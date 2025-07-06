@@ -1,0 +1,13 @@
+\contentsline {section}{\numberline {1}Literature Review}{1}{section.2}%
+\contentsline {subsection}{\numberline {1.1}Real space nearest neighbour clustering \textit {can} be equivalent to Twisted Boundary Condition Supercell}{1}{subsection.3}%
+\contentsline {section}{\numberline {2}Matching the potential and interaction periodicity}{3}{section.15}%
+\contentsline {subsection}{\numberline {2.1}Notation}{3}{subsection.16}%
+\contentsline {subsection}{\numberline {2.2}Hamiltonian for nearest neighbour real space nearest neighbour real space modulation}{4}{subsection.26}%
+\contentsline {subsection}{\numberline {2.3}Matched potential and interaction}{4}{subsection.36}%
+\contentsline {subsection}{\numberline {2.4}Real-space form of the interaction}{7}{subsection.54}%
+\contentsline {subsection}{\numberline {2.5}Limits}{10}{subsection.82}%
+\contentsline {subsubsection}{\numberline {2.5.1}$U>>V>>t$ limit}{10}{subsubsection.83}%
+\contentsline {subsubsection}{\numberline {2.5.2}$V>>U>>t$ limit}{12}{subsubsection.95}%
+\contentsline {subsubsection}{\numberline {2.5.3}$t>>V\sim U$ limit}{12}{subsubsection.100}%
+\contentsline {section}{\numberline {3}Mismatched potential and interaction}{15}{section.124}%
+\contentsline {section}{\numberline {4}Questions}{17}{section.132}%

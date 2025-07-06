@@ -17,6 +17,8 @@ dependencies = [
     "numpy",
 ]
 
+
+
 [project.optional-dependencies]
 
 
@@ -90,3 +92,11 @@ build-backend = "setuptools.build_meta"
 #reportMatchNotExhaustive = true
 #reportShadowedImports = true
 #reportPrivateImportUsage = false
+
+[tool.setuptools]
+# Tell setuptools that our source code lives in the *inner* ``aah/`` directory.
+package-dir = {"" = "aah"}
+[tool.setuptools.packages.find]
+where = ["aah"]                 # discover everything inside that dir
+
+

@@ -1,0 +1,735 @@
+\documentclass[12pt]{article}
+\usepackage{amssymb,amsfonts,amsmath, amsthm, amsbsy}
+\usepackage{caption,color,graphicx,paralist, subcaption, placeins, array, mathtools, url, mdwlist, color,tikz} 
+\usepackage[text={6.75in,9.5in},centering,letterpaper]{geometry}
+\usepackage[linktoc=all,hypertexnames=false,colorlinks=true,urlcolor=blue,linkcolor=blue,citecolor=blue]{hyperref} % hyperlinks equations when using \eqref{} 
+\usepackage[shortlabels]{enumitem}
+% \usepackage{csquotes}
+\usetikzlibrary{decorations.pathmorphing, calc, arrows.meta}
+\newcommand*\dif{\mathop{}\!\mathrm{d}}
+\usepackage{setspace} % lets you doublespace if you're into that
+
+\DeclarePairedDelimiter\bra{\langle}{\rvert} % \bra{} for a bra, use \bra*{} to auto-size
+\DeclarePairedDelimiter\ket{\lvert}{\rangle}% \ket{} for a ket, use \ket*{} to auto-size
+\DeclarePairedDelimiterX\braket[2]{\langle}{\rangle}{#1 \delimsize\vert #2} % \braket{}{}, \braket*{}{}
+
+\setlength{\parskip}{1.0ex plus0.2ex minus0.2ex}
+\setlength{\parindent}{0.0in}
+\renewcommand{\baselinestretch}{1.2}
+
+\renewcommand*{\arraystretch}{1.5}
+
+\everymath={\displaystyle}
+ \numberwithin{equation}{section}
+ 
+\usepackage[thinc]{esdiff} 
+
+\renewcommand{\Re}[1]{\text{\textit{Re}}[#1]} % real part - \Re{}
+\renewcommand{\Im}[1]{\text{\textit{Im}}[#1]} % im part - \Im{}
+
+\newcommand{\N}{\mathbb{N}} % natural numbers shortcut
+\newcommand{\Z}{\mathbb{Z}} % integers shortcut
+\newcommand{\R}{\mathbb{R}} % real numbers shortcut
+\newcommand{\F}{\mathbb{F}} % arbitrary field shortcut
+% \newcommand{\c2t}{$C_{2z}\mathcal{T}$}
+\newcommand{\CT}{C_{2z}\mathcal{T}}
+ 
+ 
+ % Math stuff - lets you make \begin{theorem} commands and whatnot. the environments in general work the same as the ppart environment.
+\newtheorem{Theorem}{Theorem}[section]
+\newtheorem{Conjecture}[Theorem]{Conjecture}
+\newtheorem{Lemma}[Theorem]{Lemma}
+\newtheorem{Proposition}[Theorem]{Proposition}
+\newtheorem{Corollary}[Theorem]{Corollary}
+\newtheorem{Example}[Theorem]{Example}
+\newtheorem{Definition}[Theorem]{Definition}
+\newtheorem*{Notation}{Notation}
+\newtheorem{Remark}[Theorem]{Remark}
+\newtheorem{Assumption}{Assumption}
+
+\newenvironment{exercise}[2][]{\begin{trivlist}
+\item[\hskip \labelsep {\bfseries #1}\hskip \labelsep {\bfseries #2.}]}{\end{trivlist}} % Exercise environment.
+\newenvironment{ppart}[2][]{\begin{trivlist}
+\item[\hskip \labelsep {\bfseries #1}\hskip \labelsep {\bfseries #2.}]}{\end{trivlist}} % Part environment.
+
+% Dmitry Additions
+\newtheorem*{strategy}{Strategy}
+\newcommand{\pd}[3]{\bigg(\frac{\partial #1}{\partial #2}\bigg)_{#3}}
+\newcommand{\funcd}[3]{\bigg(\frac{\delta #1}{\delta #2}\bigg)_{#3}}
+\usepackage{cleveref}
+\usepackage{braket}
+\usepackage{slashed}
+\usepackage{dsfont}
+\DeclareMathOperator{\sech}{sech}
+\usepackage{dsfont}
+\usepackage{cancel}
+\usepackage{xcolor}
+% grrrr... for blocking matrices
+\usepackage{arydshln}
+\usepackage{nicematrix} % in your preamble
+\usepackage[most]{tcolorbox} %Apparently, makes nice boxes and load necessary libraries (skins, breakable, toggles, etc.)
+\newcommand\Ccancel[2][black]{\renewcommand\CancelColor{\color{#1}}\cancel{#2}}
+\usepackage{simpler-wick}
+\DeclareMathOperator{\Tr}{Tr}
+\usepackage[gobble=auto]{pythontex}
+% \usepackage{pgfplots}
+% \usepackage{ulem}
+% Stuff Dmitry added
+% \usepackage{cleveref}
+% \usepackage{babel}
+% \usepackage{dsfont}
+% \usepackage{subfig}
+\usepackage{tabularx}
+\usepackage{multirow}
+\usepackage{xfp}
+\usepackage{calc}
+\usepackage[nomessages]{fp}
+% \usepackage{chemformula}
+
+\NewExpandableDocumentCommand{\bettersquareroot}{O{16}m}{%
+  \fpeval{round(sqrt(#2),#1)}%
+}
+
+
+
+
+
+
+\title{AAH paper} % title
+
+
+
+\begin{document}
+\maketitle
+\tableofcontents
+
+% \section{Motivation}
+
+\section{Literature Review}
+\subsection{Real space nearest neighbour clustering \textit{can} be equivalent to Twisted Boundary Condition Supercell}
+I think we can show that the ``Orbital HK" model which adds in all interactions for a nearest neighbour real space cluster   proposed clustering scheme (i.e. Philips' scheme) is equivalent to a supercell method with unconventional twisted boundary conditions.
+
+For concreteness, consider the following setup. We start from a single band 1D chain with nearest-neighbour hopping and Hubbard interactions\footnote{Not sure if it makes a difference if it's open or periodic BC for the accuracy of the twisted BC scheme}:
+\begin{equation}
+    H=\sum_{i=1}\sum_{\sigma}^{N}-tc^\dagger_{i+1,\sigma}c_{i,\sigma}+h.c.+U\sum_{i=1}^{N}n_{i\uparrow}n_{i\downarrow}
+\end{equation}
+We then approximate this via a supercell of $N_c$ sites, and obtain an approximation for a given operator (i.e. the Hamiltonian (energy) or the number operator) by averaging that operator over a set (which may consists of a single special twist angle) of twist angles $\Omega_\theta$. We consider the simplest case: the supercell consists of two sites, $N_c=2$, of total length $L_c=(N_c-1) a$. 
+
+Twisted boundary conditions can be considered as a generalization of periodic boundary conditions. Instead of the wavefunction of a \textit{single} particle being equal to itself at a periodic boundary, it is equal up to a phase $\theta_g$\footnote{Subscript to indicate that this is a global phase}:
+\begin{equation}
+    \psi(r+L)=e^{i\theta_g}\psi(r).
+\end{equation}
+Periodic boundary conditions are then the special case when $\theta_g=2\pi n$. We are free to consider this phase as being added either ``all-at-once" when the particle crosses a boundary, or as a general function of position. A simple choice is just to make the phase accumulation linear in position. This can be implemented by adding the phase to the creation operators:
+\begin{equation}
+    c^\dagger_{n a}\to e^{i\theta_g n /L}c^\dagger_{r}
+\end{equation}
+This changes our dispersion:
+\begin{align}
+    \sum_{r=0}^{L=Na}c^\dagger_{r+a}c_r+h.c.\to \sum_{r=0}^{L=Na}e^{i\theta_g/L}c^\dagger_{r+a}c_{r}+h.c. .
+\end{align}
+Transforming into Fourier space:
+\begin{align}
+    \label{eq:tbc_ham}
+    \sum_{r}e^{i\theta_g/L}c^\dagger_{r+a}c_{r}+h.c.
+    =\sum_{k}e^{i\theta_g/L}e^{ik\cdot a}c^\dagger_{k}c_{k}+h.c.
+    =\sum_{k}2\cos(ka+\theta_g/L)c^\dagger_kc_k .
+\end{align}
+An equivalent perspective is to note that the boundary conditions define the allowed wavevectors, and so adding a phase of $\theta_g$ on traversing the system length shifts the allowed quantized wave-vectors:
+\begin{equation}
+    k_n=\frac{2\pi}{L_c}n\to\frac{2\pi}{L_c}n+\frac{\theta_g}{L_c}.
+\end{equation}
+The twist angle $\theta_g$ is allowed to take any value $-\pi\leq\theta_g\leq\pi$, so that the local twist angle $\theta\equiv\frac{\theta_g}{L_c}$ can be in the range:
+\begin{equation}
+    -\pi\leq\theta_g\leq\pi\implies \frac{-\pi}{a}\leq\theta \leq\frac{\pi}{a}
+\end{equation}
+Since our twisted boundary condition Hamiltonian (for two sites) \cref{eq:tbc_ham} has the dispersion:
+\begin{equation}
+    \sum_{k=\pm\pi/a}2\cos(ka+\theta)c^\dagger_kc_k.
+\end{equation}
+To reproduce the HK dispersion, we need to choose the local twist angles $\theta$ such that we reproduce every $k$ point in the Brillouin zone. We can do this by just choosing the set of twist angles which are spaced by two lattice vectors:
+\begin{align}
+    \Omega_\theta=\bigg\{\frac{2\pi}{L}(2n)\bigg| 2n a < L\bigg\}
+\end{align}
+If we then also work in the Grand Canonical Ensemble at each cluster, this reproduces exactly the scheme in the appendix of Philips' paper for the 1D nearest-neighbour clustering.
+
+\section{Matching the potential and interaction periodicity}
+\subsection{Notation}
+We'll use the following notation:
+\begin{enumerate}
+    \item Let $K$ be the $k$-point which labels the cluster - by convention the $k$-point closest to the $-\pi$ edge of the Brillouin Zone (BZ) in that cluster.
+    \item Let $\tilde{k}_a$ be the $a$-th $k$ point within a cluster, labeled with increasing distance from the $-\pi$ edge of the BZ.
+    \item Let $i,j,k,...=1,2,3,...$ be indices of a lattice site in real space.
+    \item Let $\alpha,\gamma,\delta,...$ index the basis states which diagonalize the Hubbard interaction within a cluster.
+\end{enumerate}
+
+The procedure to derive the interaction is then:
+\begin{enumerate}
+    \item First, partition the BZ into clusters of $k$ points. Restrict the interaction to be only between the $k$ points \textit{within} a cluster.
+    \item Add the (in our case not quasi-) periodic Aubry-Andre potential $\sum_{i}V_0\cos(2\pi\beta i)$. Since this can in general couple our momentum clusters, we have to distinguish several cases. 
+        \begin{enumerate}
+            \item The simplest case is when the $k$-points coupled by the potential all fall within the $k$-points coupled by the interaction. In this case we can simply solve for our original cluster with the new term. \\
+            
+            Example: $\beta=1/2$ and $Q=\pi$ interactions (i.e. nearest neighbour real space, $\pi$ separation in momentum space).
+            \item The next simplest case is when the $k$-points coupled by the potential are periodic in the $k$-points coupled by the interaction. \\
+            
+            Example: $\beta=1/2$ and $Q=\pi/2$ interaction clusters (i.e. next nearest neighbour in real space, $\pi$/2 separation (i.e. quarter BZ, fermi surface at half-filling) in momentum space). Here the potential couples together two interaction clusters.
+            \item The potential modulation is not a rational fraction of the interaction modulation (i.e. they are incommensurate). In this case, I think there are no momentum super-sectors that we can identify, and the problem reduces to the Hubbard model.\\
+            
+            Example: $\beta=1/3$ and $Q=\pi$. TODO: Check if this right.
+         \end{enumerate}
+\end{enumerate}
+
+\subsection{Hamiltonian for nearest neighbour real space nearest neighbour real space modulation}
+The Aubry-Andre potential is given by:
+\begin{equation}
+    \hat{V}=V_0\sum_{j}\cos(2\pi\beta j)n_{j,\sigma}
+\end{equation}
+We first work out the form of this potential in momentum space. 
+
+\begin{align}
+\hat V
+  &= V_0 \sum_{j=1}^{N} \cos\!\bigl(2\pi \beta j\bigr)\, n_j \\[4pt]
+  &= \frac{V_0}{2}\sum_{j=1}^{N} 
+     \Bigl(e^{\,i2\pi\beta j}+e^{-\,i2\pi\beta j}\Bigr)\, n_j \\[6pt]
+  &= \frac{V_0}{2}\sum_{j=1}^{N}\sum_{k,k'}
+     \Bigl(e^{\,i2\pi\beta j}+e^{-\,i2\pi\beta j}\Bigr)
+     e^{\,i k j a}\,e^{-\,i k' j a}\,
+     c^{\dagger}_{k} c_{k'} \\[6pt]
+  &= \frac{V_0}{2}\sum_{j=1}^{N}\sum_{k,k'}
+     \Bigl[e^{\,i2\pi\beta j}\,e^{\,i(k-k')j a}
+           +e^{-\,i2\pi\beta j}\,e^{-\,i(k-k')j a}\Bigr]\,
+     c^{\dagger}_{k} c_{k'} \\[6pt]
+  &= \frac{V_0}{2}\sum_{j=1}^{N}\sum_{k,k'}
+     e^{\,i j a\!\left(k-k'-\frac{2\pi\beta}{a}\right)}
+     c^{\dagger}_{k} c_{k'} \;+\;\text{h.c.} \\[6pt]
+  &= \frac{V_0}{2}\sum_{k,k'}
+     \delta_{\,k,\;k'+\tfrac{2\pi\beta}{a}}\,
+     c^{\dagger}_{k} c_{k'} \;+\;\text{h.c.} \\[6pt]
+  &= \frac{V_0}{2}\sum_{k}
+     c^{\dagger}_{k}\,c_{\,k+\frac{2\pi\beta}{a}} \;+\;\text{h.c.}
+\end{align}
+
+
+We start with the simplest case, where the Aubry-Andre potential modulates nearest-neighbour sites in real space - $\beta=1/2$ (or $k$-points separated by half a RLV - $\pi/a$). In this case the potential becomes:
+\begin{align}
+\label{eq:v_kspace}
+V_0 \sum_{j=1}^{N} \cos\!\bigl(\pi j\bigr)\, n_{j}=
+V_0\sum_{j}(-1)^jn_j=
+\frac{V_0}{2}\sum_{k}c^\dagger_{k+\pi/a}c_{k}+h.c.
+\end{align}
+
+\subsection{Matched potential and interaction}
+We first consider the simplest case - where the potential connects momentum points within a cluster. In this case the $\beta=1/2$ and the separation between momentum points in a cluster is half a reciprocal lattice vector $\pi/a$.
+
+Combining the momentum space form of the Hubbard Hamiltonian with interactions restricted to the momentum clusters and the Aubry-Andre potential \cref{eq:v_kspace} we have:
+
+\begin{equation}
+    \label{eq:hubbard_cluster_H}
+    H=\sum_{K}\sum_{k_a\in K}\epsilon(k_a)n_{k_a,\sigma}
+    +U\sum_{K}\sum_{k_a,k_b,q_c\in K}
+    c^\dagger_{k_a+q_c,\uparrow}c_{k_a,\uparrow}
+    c^\dagger_{k_b-q_c,\downarrow}c_{k_b,\downarrow}
+    +\frac{V_0}{2}\sum_{K}\sum_{<a,b>}c^\dagger_{k_a}c_{k_b}+h.c.
+\end{equation}
+In this case, we cluster together momentum points separated by the maximal distance, $k=\pi/a$, which is equivalent to clustering together nearest neighbours in real space.\footnote{Still have some uncertainty about whether it is just the $k$'s that are in that momentum cluster or whether it is only when the arguments of the creation operators fall within it. I think they are equivalent under periodic boundary conditions in the cluster (have notes somewhere - the key observation is that this is what happens in the finite-site Hubbard model. There you have to have all of them being in the cluster to get the perfectly localized in real space transformation).}.
+
+Notice that the cluster momentum $K$ remains a good quantum number. The most complicated term here is the interaction. As before, we can exploit the fact that there are no $k$ dependent interactions coefficients to localize it to a single index by introducing the basis transformation:
+\begin{align}
+    c^\dagger_{k_a}=\frac{1}{\sqrt{n}}\sum_{\alpha=1}^{n}e^{ik^0_a\cdot R^{0}_{\alpha}}c^\dagger_{\alpha} .
+\end{align}
+As before, we know this transforms the Hamiltonian without the Aubry-Andre potential into:
+\begin{equation}
+    H=\sum_{K}
+    \left[\sum_{\alpha=1}^{n_c=2}\sum_{\sigma}
+    \tilde t(K) c^\dagger_{\alpha+1,\sigma}c_{\alpha,\sigma}+h.c.
+    +\tilde\mu(K) n_{\alpha,\sigma}-\mu_0n_{\alpha,\sigma}
+    +U\sum_{\alpha=1}^{n=2}n_{\alpha,\uparrow}n_{\alpha,\downarrow}
+    % +\frac{V_0}{2}\sum_{\alpha=1}^{n=2,\sigma}(-1)^{\alpha+1}n_{\alpha,\sigma}
+    \right]
+\end{equation}
+We need to derive the form of the Aubry-Andre potential in this basis. We have:
+\begin{align}
+    \hat{V}&=\frac{V_0}{2}\sum_{k}c^\dagger_{k+\pi}c_k+h.c.
+    =\frac{V_0}{2}\sum_{K}\sum_{a=1}^{2}c^\dagger_{a+1}c_{a}+h.c.\\
+    &=\frac{V_0}{2}\sum_{K}\sum_{a=1}^{2}\sum_{\alpha,\beta}
+    e^{ik^0_{a+1}\cdot R^0_{\alpha}}
+    e^{-ik^0_{a}\cdot R^0_{\beta}}
+    c^\dagger_{\alpha}c_{\beta}+h.c.\\
+    &=\frac{V_0}{2}\sum_{K}\sum_{a=1}^{2}\sum_{\alpha,\beta}
+    e^{ik_a^0\cdot (R^0_{\alpha}-R^0_{\beta})}e^{ik^0\cdot R^0_{\alpha}}c^\dagger_{\alpha}c_{\beta}+h.c.\\
+    &=\frac{V_0}{2}\sum_{K}\sum_{\alpha,\beta}\delta_{a,b}
+    e^{ik^0\cdot R^0_{\alpha}}c^\dagger_{\alpha}c_{\beta}+h.c.\\
+    &=\frac{V_0}{2}\sum_{K}\sum_{\alpha}(-1)^{1+\alpha}
+    c^\dagger_{\alpha}c_{\alpha}+h.c.\\
+\end{align}
+Here $k^0$ is the basis transformation for nearest neighbours in the momentum space cluster - in this case $k^0=\pi/a$. The last line then follows from the fact:
+\begin{align}
+    k^0=\pi/a,\text{  },R^0_{\alpha=1}=0, \text{  },R^0_{\alpha=2}=a
+    \implies e^{ik^0\cdot R^0_{\alpha}}=(-1)^{1+\alpha}
+\end{align}
+
+We see that, when the modulation of the potential is matched to the spacing of the interaction clusters, we get a ``$\sigma^z$" type term. Note that this is the same form as the real space form of the Aubry-Andre potential. This makes sense, and follows for the same reason that the interaction localizes perfectly in momentum space - there is no momentum dependent coefficient on the hopping.\footnote{Interesting - I hadn't realized previously that, in general, no momentum dependent coefficient $\implies$ same form in new basis as real space basis.}
+
+
+
+
+
+Putting all this together, the form of the Hamiltonian in the new basis is hence:
+\begin{equation}
+    \boxed{
+    \label{eq:ham_nnV_nnU}
+    H=\sum_{K}
+    \left[\sum_{\alpha=1}^{n_c=2}\sum_{\sigma}
+    \tilde t(K) c^\dagger_{\alpha+1,\sigma}c_{\alpha,\sigma}+h.c.
+    +\tilde\mu(K) n_{\alpha,\sigma}-\mu_0n_{\alpha,\sigma}
+    +U\sum_{\alpha=1}^{n=2}n_{\alpha,\uparrow}n_{\alpha,\downarrow}
+    +\frac{V_0}{2}\sum_{\alpha=1,\sigma}^{n=2}(-1)^{\alpha+1}n_{\alpha,\sigma}
+    \right]
+    }
+\end{equation}
+
+TODO: Schematic image of the clustering scheme in real space and in momentum space.
+
+In other words, we can write down a Hamiltonian kernel for each momentum supersector:
+
+\begin{equation}
+    H=\sum_{K}H_K
+\end{equation}
+
+With the Hamiltonian kernel $\mathcal{H}(K)$ given by the Hamiltonian on a choice of local basis. Noting that both the total particle number $\sum_{\alpha}n_{\alpha}$ and the $S_z$ component of the spin commute with the Hamiltonian kernel:
+\begin{equation}
+    [H_K,\sum_{\alpha}n_\alpha]=0,[H_K,S_z]=0
+\end{equation}
+allows us to further block diagonalize the Hamiltonian $H_K$ into blocks of fixed particle number and $S_z$. Explicitly, using a basis enumeration for the one and two particle states:
+
+
+\begin{table}[h]
+\centering
+\begin{minipage}{0.48\textwidth}
+\centering
+\begin{tabular}{c c l}
+\hline\hline
+Index & State & Label \\
+\hline
+$1$ & $c^\dagger_{\mathbf{k}A\uparrow}\ket{0}$ & $\ket{A\uparrow}$ \\
+$2$ & $c^\dagger_{\mathbf{k}A\downarrow}\ket{0}$ & $\ket{A\downarrow}$ \\
+$3$ & $c^\dagger_{\mathbf{k}B\uparrow}\ket{0}$ & $\ket{B\uparrow}$ \\
+$4$ & $c^\dagger_{\mathbf{k}B\downarrow}\ket{0}$ & $\ket{B\downarrow}$ \\
+\hline
+\end{tabular}
+\caption{Single-particle states in the $\mathbf{k}$ sector}
+\label{tab:single_particle_states}
+\end{minipage}
+\hfill
+\begin{minipage}{0.48\textwidth}
+\centering
+\begin{tabular}{c c l}
+\hline\hline
+Index & State & Label \\
+\hline
+$1$ & $c^\dagger_{\mathbf{k}A\uparrow}c^\dagger_{\mathbf{k}B\uparrow}\ket{0}$ & $\ket{A\uparrow; B\uparrow}$ \\
+$2$ & $c^\dagger_{\mathbf{k}A\uparrow}c^\dagger_{\mathbf{k}A\downarrow}\ket{0}$ & $\ket{A\uparrow; A\downarrow}$ \\
+$3$ & $c^\dagger_{\mathbf{k}A\downarrow}c^\dagger_{\mathbf{k}B\uparrow}\ket{0}$ & $\ket{A\downarrow; B\uparrow}$ \\
+$4$ & $c^\dagger_{\mathbf{k}A\uparrow}c^\dagger_{\mathbf{k}B\downarrow}\ket{0}$ & $\ket{A\uparrow; B\downarrow}$ \\
+$5$ & $c^\dagger_{\mathbf{k}B\uparrow}c^\dagger_{\mathbf{k}B\downarrow}\ket{0}$ & $\ket{B\uparrow; B\downarrow}$ \\
+$6$ & $c^\dagger_{\mathbf{k}A\downarrow}c^\dagger_{\mathbf{k}B\downarrow}\ket{0}$ & $\ket{A\downarrow; B\downarrow}$ \\
+\hline
+\end{tabular}
+\caption{Two-particle states in the $\mathbf{k}$ sector}
+\label{tab:two_particle_states}
+\end{minipage}
+\end{table}
+we can write down the Hamiltonian kernel for the one and two particle states:
+
+\begin{equation}
+\mathcal{H}_1(K)=
+\begin{pmatrix}
+V_0/2 & 0 &t& 0\\
+0 & V_0/2 &0&t\\
+t & 0 & -V_0/2&0\\
+0 & t &0 &-V_0/2
+\end{pmatrix}
++(\tilde \mu-\mu_0)\mathds{1}
+\end{equation}
+
+
+\[
+\mathcal{H}_2(K)=\left(
+\begin{array}{c|cccc|c}  % │ after col 1 and col 5
+  0 & 0 & 0   & 0  & 0   & 0 \\ \hline
+  0 & U+V_0 & -t  &  t & 0   & 0 \\
+  0 & -tg & 0   & 0  & -tg & 0 \\
+  0 &  tg & 0   & 0  &  tg & 0 \\
+  0 & 0   & -tg & tg & U-V_0 & 0 \\ \hline
+  0 & 0   & 0   & 0  & 0   & 0
+\end{array}
+\right)
++2(\tilde \mu-\mu_0)\mathds{1}
+\]
+
+And similarly for the higher particle numbers. So we see that the effect of the modulation and clustering is simply to introduce a hopping \textit{within} an interaction cluster when their periods match. This is just the two site Hubbard model with a staggered potential. The staggered potential breaks the mirror symmetry that allows the Hamiltonian to be reduced to a simple solvable form, but it can still be diagonalized.
+\subsection{Real-space form of the interaction}
+Before moving on, let's see if we can understand the form of this interaction in real space. The interaction is:
+\begin{equation}
+    H_{I}\sum_{<k_1,k_2,q>}c^\dagger_{k_1+q}c_{k_1}c^\dagger_{k_2-q}c_{k_2},
+\end{equation}
+which is really just a useful way to parameterize the center-of-momentum conserving constraint\footnote{You can see this by defining $q\equiv k_1-k_2$ and then using the delta constraint to eliminate $k_3$.}:
+\begin{equation}
+    H_{I}=\sum_{<k_1,k_2,k_3,k_4>}\delta_{k_1+k_3,k_2+k_4}c^\dagger_{k_1}c_{k_2}c^\dagger_{k_3}c_{k_4}.
+\end{equation}
+The angled brackets here denote the fact that all the \textit{arguments} of the second quantized operators must be within a cluster. 
+The difficulty comes from keeping track of what values of $k_1,k_2,q$ are allowed to keep everything within the cluster. 
+In order to in the end get an interaction that is diagonal in the $\alpha$ basis, we need the form of the interaction within a cluster to match the form the interaction would take if it were in a Hubbard model of size equal to the cluster. 
+That is, for $n_C$ sites in the cluster, we need all $n_C^3$ terms of the interaction. 
+To achieve that, we need to understand that if a $k_1\pm q$ term goes outside of the cluster, it should be indexed back to the term it would have been had $k_1$ and $q$ been in the size $n_C$ Hubbard model.
+It's easiest to see this with two examples. \\
+
+First, we consider the case where we cluster together momentum points separated by $\pi/a$ (nearest-neighbours in real-space).
+In order for all momentum points to fall within a cluster whose reference $k$-point is $K$ we can use the parameterization:
+\begin{align}
+    k_1&=\{K,K+\pi\}\\
+    k_2&=\{K,K+\pi\}\\
+    q&=\{0,\pi\}
+\end{align}
+We are lucky in this case because separation by $\pi$ automatically ``wraps-around'' the Brillouin Zone to get us back to the original points within the cluster. \\
+
+This is a special property of $\pi$ separation. In general, we would have to use a more complicated parameterization. For example, if we were considering clustering together nearest-neighbours in $k$-space (i.e. $\Delta K=2\pi/L)$ then naively applying a similar parameterization:
+\begin{align}
+    k_1&=\{K,K+2\pi/L\}\\
+    k_2&=\{K,K+2\pi/L\}\\
+    q&=\{0,2\pi/L\},
+\end{align}
+would fail to keep all the arguments within the cluster - clearly $k_1+q=(K+2\pi/L)+(2\pi/L)=K+4\pi/L\not\in C_K$. Instead, we would need to use a parameterization like:
+\begin{align}
+    &q=0,\text{  }k_1,k_2\{K,K+2\pi/L\}\\
+    &q=2\pi/L, \text{  } k_1=K, k_2=K+2\pi/L (\times 2)\\
+    &q=-2\pi/L, \text{  } k_1=K+2\pi/L, k_2=K (\times 2)\\,
+\end{align}
+where the $\times 2$ indicates that we would need to repeat those terms twice to match the terms in the $n_C$ size cluster. Or, alternatively:
+\begin{itemize}
+    \item $q=0$: four terms where $(k_1, k_2)$ can be any pair from the cluster.
+    \item $q=2\pi/L$: four terms where $(k_1,k_2)$ can be any pair from the cluster, and we define $(K+2\pi/L)+2\pi/L \equiv K$.
+\end{itemize}
+
+\begin{tcolorbox}
+    TODO: Is there a more elegant way to do this? Does doing it this way introduce any issues with Hubbard convergence? I think this point just comes down to whether you consider periodic boundary conditions in your interaction or whether you consider open boundary conditions.\\
+
+    Bit worried about this...
+\end{tcolorbox}
+
+Working just with the case of $\pi$ clustering for now, we can now use our parameterization to derive the real space interaction. We note that since we consider $k$-points separated by $\pi$ in the clusters, we can index the clusters by $K$ running from $-\pi/a,..., 0$. Using this and the parameterization of $k_1,k_2$ and $q$ we can write:
+
+\begin{align}
+    H_I&=\sum_{K=-\pi/a}^{0}\sum_{k_1,k_2=\{K,K+\pi/a\}}\sum_{q=\{0,\pi/a\}}
+    c^\dagger_{k_1+q,\uparrow}c_{k_1}c^\dagger_{k_2-q,\downarrow}c_{k_2,\downarrow}\\
+    &=\sum_{K=-\pi/a}^0\sum_{k_1,k_2=\{K,K+\pi/a\}}\sum_{q=\{0,\pi/a\}}
+    \sum_{R_1,...,R_4}
+    \left[
+        e^{i(k_1+q)\cdot R_1}e^{i(k_1)\cdot R_2}e^{i(k_2-q)\cdot R_3}e^{i(k_2)\cdot R_4}
+    \right]
+    c^\dagger_{R_1,\uparrow}c_{R_2,\uparrow}c^\dagger_{R_3,\downarrow}c_{R_4,\downarrow}
+\end{align}
+We can make the $k_1,k_2$ and $q$ sums symmetric by factoring out the overall factor of the cluster reference momentum $K$ from $k_1$ and $k_2$:
+\begin{align}
+    H_I&=\sum_{K=-\pi/a}^0\sum_{k_1,k_2=\{0,\pi/a\}}\sum_{q=\{0,\pi/a\}}
+    \sum_{R_1,...,R_4}
+    \left[
+        e^{iK\cdot (R_1-R_2)}e^{iK\cdot (R_3-R_4)}e^{i(k_1+q)\cdot R_1}e^{-i(k_1)\cdot R_2}e^{i(k_2-q)\cdot R_3}e^{-i(k_2)\cdot R_4}
+    \right]\\
+    &\times c^\dagger_{R_1,\uparrow}c_{R_2,\uparrow}c^\dagger_{R_3,\downarrow}c_{R_4,\downarrow}\\
+    &=\sum_{K=-\pi/a}^0\sum_{k_1,k_2,q=\{0,\pi/a\}}
+    \sum_{R_1,...,R_4}
+    e^{iK\cdot (R_1-R_2)}e^{iK\cdot (R_3-R_4)}
+    \left[
+        e^{i k_1\cdot (R_1-R_2)}e^{i k_2\cdot (R_3-R_4)}e^{i q\cdot (R_1-R_3)}
+    \right]\\
+    &\times c^\dagger_{R_1,\uparrow}c_{R_2,\uparrow}c^\dagger_{R_3,\downarrow}c_{R_4,\downarrow}\\
+    \shortintertext{Putting $k_i=0,\pi$ in explicitly:}
+    &=\sum_{K=-\pi/a}^0
+    \sum_{R_1,...,R_4}
+    e^{iK\cdot (R_1-R_2)}e^{iK\cdot (R_3-R_4)}\\
+    &\left[
+    (1+(-1)^{\frac{R_1-R_2}{a}})(1+(-1)^{\frac{R_3-R_4}{a}})(1+(-1)^{\frac{R_1-R_3}{a}})
+    \right]
+    \times c^\dagger_{R_1,\uparrow}c_{R_2,\uparrow}c^\dagger_{R_3,\downarrow}c_{R_4,\downarrow}\\
+    \shortintertext{Summing over the $K$ makes all $R_1+R_3-R_2-R_4$ that are an odd number of lattice vectors zero:}
+    &=\sum_{R_1,...,R_4}
+    \left[
+    (1+(-1)^{\frac{R_1-R_2}{a}})(1+(-1)^{\frac{R_3-R_4}{a}})(1+(-1)^{\frac{R_1-R_3}{a}})
+    \right]
+    \times c^\dagger_{R_1,\uparrow}c_{R_2,\uparrow}c^\dagger_{R_3,\downarrow}c_{R_4,\downarrow}\\
+    \shortintertext{The terms in the square brackets force only even separations to be non-zero. We can write this as:}
+    &=
+    \sum_{R_1}\sum_{p=2n,l=2n,r=2n}
+    \delta_{R_1+R_3,R_2+R_4+2\mathbb{Z}}
+    c^\dagger_{R_1}c_{R_1+p a}c^\dagger_{R_1+l,\downarrow}c_{R_1+l+r,\downarrow}
+\end{align}
+Note that the delta function coming from $K$ is redundant: if $R_1-R_2$ is even and $R_3-R_4$ is even then automatically $R_1+R_3-(R_2-R_4)=(R_1-R_2)+(R_3-R_4)$ is even. Note also that the only way to satisfy the constraint on the differences being even:
+\begin{align}
+    R_1-R_2=2\mathbb{Z}\\
+    R_3-R_4=2\mathbb{Z}\\
+    R_1-R_3=2\mathbb{Z}
+\end{align}
+Is for all of $R_1,..,R_4$ to be even or all of them to be odd since each difference requires both terms to have the same parity. This in turn allows us to write finally that the real space form of the interaction is simply an all-all interaction that couples all even sites and another that couples all odd sites:
+\begin{equation}
+    \boxed{
+    H_I=\sum_{R_1,...,R_4\in 2\mathbb{Z}}
+    c^\dagger_{R_1,\uparrow}c_{R_2,\uparrow}
+    c^\dagger_{R_3,\downarrow}c_{R_4,\downarrow}
+    +\sum_{R_1,...,R_4\in 2\mathbb{Z}+1}
+    c^\dagger_{R_1,\uparrow}c_{R_2,\uparrow}
+    c^\dagger_{R_3,\downarrow}c_{R_4,\downarrow}
+    }
+\end{equation}
+And perhaps this makes sense - each term in the sum is precisely one of my $n_{\alpha,\uparrow} n_{\alpha,\downarrow}$ terms.
+
+
+\subsection{Limits}
+\subsubsection{$U>>V>>t$ limit}
+We first show that at $\mu_0=U/2$, the ground state consists of every cluster being half-filled. Adding the staggered potential term breaks the particle-hole symmetry:
+\begin{equation}
+    c_{\alpha,\sigma}\to(-1)^{\alpha}c^\dagger_{\alpha,\sigma} .
+\end{equation}
+We had previously relied on the particle hole symmetry to establish that at $\mu_0=U/2$ the ground state consists of \textit{every} $k$ point being doubly occupied. In this case we can run the same argument, but with a modified symmetry that in addition to exchanging particles and holes, also exchanges the two cluster sites:
+\begin{equation}
+    c_{\alpha\sigma}\to(-1)^{i}c^\dagger_{\alpha+1,\sigma},
+\end{equation} 
+where the $\alpha$ is understood to be mod 2. Under this transformation, for $\mu_0=U/2$, we once again get that the Hamiltonian for $N$ particles maps into the Hamiltonian for $4-N$ particles. In particular, the two particle sector maps into itself. To argue that the two particle sector is also the ground state, it is sufficient to show that $E_{2,GS}<E_{1,GS}=E_{1,GS}$. So long as $U>0$ (i.e. it is repulsive) this will always be true since adding a particle at half-filling costs energy.
+
+TODO: Not sure the second part of this argument is correct.
+
+Setting $mu_0=U/2$ we can now proceed to study the $U>>V>>t$ limit. The simple way to do this is via a Schrieffer-Wolff transformation. Since the interacting and potential parts commute, we can take our starting Hamiltonian as the sum of the two:
+\begin{equation}
+    H_0=U\sum_{\alpha=1}n_{\alpha,\uparrow}n_{\alpha,\downarrow}+\frac{V_0}{2}\sum_{\alpha,\sigma}(-1)^{\alpha}n_{\alpha,\sigma}-\mu_0\sum_{\alpha,\sigma}n_{\alpha,\sigma}
+\end{equation}
+Since $U>>V$, this clearly selects the four states with no double occupation:
+\begin{equation}
+    \ket{A\uparrow; B\uparrow},\ket{A\uparrow; B\downarrow},\ket{A\downarrow; B\uparrow},\ket{A\downarrow; B\downarrow}
+\end{equation}
+as the ground state - exactly as would be the case for the Hubbard model alone. As in standard degenerate perturbation theory, we can then proceed to find the perturbing Hamiltonian (here the hopping) when restricted to this set of states. Since the hopping always maps to a state outside of this space, the first order perturbation is zero. The second order pertubation is given by:
+\begin{equation}
+    H_{m,n}=\frac{1}{2}\sum_{l}\bra{m}T\ket{l}\bra{l}T\ket{n}
+    \left(
+        \frac{1}{E_{m,GS}-E_{l}}+\frac{1}{E_{n,GS}-E_{l}}
+    \right),
+\end{equation}
+where $l$ indexes the states outside the low-energy state space, and $m,n$ index the states within the low-energy subspace. 
+% Because the hopping always takes a state in the low-energy subspace to a state outside of it, the sum over $l$ is equal to a resolution of the identity. This simplifies our expression to:
+We can calculate the action of the hopping $T$ on the space of low-energy states explicitly. When acting on the $S_z=\pm 1$ states $\ket{A\uparrow; B\uparrow}$ and $\ket{A\downarrow; B\downarrow}$ the hopping gives zero.\footnote{Can't have virtual Pauli fluctuations?}. When acting on the $S_z=0$ states the result is an identity term and a spin-flipping term. To see this act first with the hopping operator on an $S_z=0$ state:
+\begin{align}
+T\ket{A,\uparrow;B,\downarrow}=\underbrace{t\ket{B,\uparrow;B,\downarrow}}_{E_l=U-V_0}
++\underbrace{t\ket{A,\uparrow;A,\downarrow}}_{E_l=U+V_0},
+\end{align}
+and then also on the resulting states:
+\begin{align}
+    &T\ket{B,\uparrow;B,\downarrow}=t\ket{A,\uparrow;B,\downarrow}+t\ket{B,\uparrow;A,\downarrow}
+    =t\ket{A,\uparrow;B,\downarrow}-t\ket{A,\downarrow;B,\uparrow} \\
+    &T\ket{A,\uparrow;A,\downarrow}=t\ket{A,\uparrow;B,\downarrow}+t\ket{B,\uparrow;A,\downarrow}
+    =t\ket{A,\uparrow;B,\downarrow}-t\ket{A,\downarrow;B,\uparrow}
+\end{align}
+And so we can write down the non-zero part (i.e the two $S_z=0$ states)  of the perturbing Hamiltonian as:
+\begin{equation}
+    \boxed{
+    H_{m,n} = -t^2 \left( \frac{1}{U - V_0} + \frac{1}{U + V_0} \right) (\tau^0 - \tau^x)
+    },
+\end{equation}
+where $\tau^i$ denotes the Pauli matrices between the space of $S_z=0$ states. Hence, in the case of matching potential period and interaction clustering, the potential simply acts to renormalize the interaction in the $U>>V>>t$ limit.\footnote{I guess this makes sense - because the potential is invisible at first order and the hopping starts in the space of low energy U states, the potential only acts to lower the energy on average.}
+
+\subsubsection{$V>>U>>t$ limit}
+We now consider the $V>>U>>t$ limit. The starting Hamiltonian is the same, but the low-energy subspace now consists of the single state which is the ground state of $V$ - $\ket{B\uparrow; B\downarrow}$. The hopping once again maps this to other states, so the first order perturbation is zero. Since there is only one state, only the hopping that maps the state back to its original via an intermediate state survives:
+\begin{align}
+    T\ket{B\uparrow;B,\downarrow}=\underbrace{t\ket{A\uparrow;B,\downarrow}}_{E_l=0}
+    +\underbrace{t\ket{B\uparrow;A,\downarrow}}_{E_l=0}
+\end{align}
+Acting again gives:
+\begin{align}
+    &T\ket{A\uparrow;B,\downarrow}=t\ket{B\uparrow;B,\downarrow}
+    +t\ket{A\uparrow;A,\downarrow}\\
+    &T\ket{B\uparrow;A,\downarrow}=t\ket{A\uparrow;B,\downarrow}
+    +t\ket{B\uparrow;B,\downarrow}
+\end{align}
+Only the mapping back to the first state survives, and so the second order perturbation is given by:
+\begin{equation}
+    \boxed{
+    H_{0,0}=\frac{t^2}{U-V_0}
+    }
+\end{equation}
+\subsubsection{$t>>V\sim U$ limit}
+If the hopping $t$ plays the role of the within-layer hopping, and $V$ plays the role of the between-layer hopping, then the limit that seems relevant to Moire is the $t>>V\sim U$ limit. In the large $t$ limit, the ground state of the system should be the tensor product of the single-partice ``momentum" (in the new, $\alpha$ basis). It is easier to account for these states in the ``$\alpha$-momentum" basis. The single particle states are given by:
+\begin{equation}
+    \ket{k_{\alpha},\sigma}=\frac{1}{\sqrt{2}}(\ket{A,\sigma}+(-1)^{\alpha+1}\ket{B,\sigma})
+\end{equation}
+where in the size-two cluster we are considering here $k_{\alpha=1}=0,k_{\alpha=2}=\pi/a$. The two-particle states are then just the anti-symmetric combinations of the single particle states that minimize the energy. The lowest energy state is just the one which puts both particles in the $k_{\alpha=2}=\pi/a$ state:
+\begin{align}
+    \ket{k_{\alpha=2},\uparrow;k_{\alpha=2},\downarrow}&=
+    \frac{1}{\sqrt{2}}\left[\ket{A,\uparrow}-\ket{B,\uparrow}\right]\otimes
+    \frac{1}{\sqrt{2}}\left[\ket{A,\downarrow}-\ket{B,\downarrow}\right]\\
+    &=\frac{1}{2}\left[\ket{A,\uparrow;A,\downarrow}+\ket{B,\uparrow;B,\downarrow}
+    -\ket{A,\uparrow;B,\downarrow}-\ket{B,\uparrow;A,\downarrow}\right]
+\end{align}
+
+\begin{tcolorbox}[title=Formal Note, 
+    colback=gray!5!white, 
+    colframe=gray!80!black, 
+    breakable, 
+    enhanced, 
+    sharp corners=south, 
+    before upper={\parindent15pt}]
+I'm kind of mixing notation here and not properly using the tensor product. Formally, to construct the $n=2$ many-body state from the single particle states, I should take the anti-symmetric product between the states:
+\begin{equation}
+    \ket{\text{n-body}}=\bigwedge^{n}\ket{\text{single particle state}}.
+\end{equation}
+For example, in this case that would give us:
+\begin{align}
+    &\bigwedge  \frac{1}{\sqrt{2}}\left[\ket{A,\uparrow}-\ket{B,\uparrow}\right]
+    \frac{1}{\sqrt{2}}\left[\ket{A,\downarrow}-\ket{B,\downarrow}\right]\\
+    =&\frac{1}{2}
+    \left[
+        \ket{A,\uparrow}\wedge\ket{A,\downarrow}-\ket{A,\uparrow}\wedge\ket{B,\downarrow}+...
+    \right]\\
+    =&\frac{1}{2}
+    \left[
+        \frac{1}{\sqrt{2}}(\ket{A,\uparrow}\ket{A,\downarrow}-\ket{A,\downarrow}\ket{A,\uparrow})
+        -\frac{1}{\sqrt{2}}(\ket{A,\uparrow}\ket{B,\downarrow}-\ket{B,\downarrow}\ket{A,\uparrow})
+        +...
+    \right]
+\end{align}
+I.e. we distribute the wedge product using the multi-linearity and then we can calculate it as the determinant of the two resulting states. In this notation, the colon (;) in the ket indicates a tensor product so that the particles can be swapped without a change of sign. In what I'm doing here I'm implicitly using the property that permuting particles separated by the colon (;) changes the sign an odd number of times.
+
+From Fulton and Harris and \href{https://math.stackexchange.com/questions/1757039/how-to-prove-that-the-wedge-product-is-the-determinant-spivaks-claim}{this SE}.
+\end{tcolorbox}
+
+We can then calculate the energy correction from the interaction and potential terms the same way as before. Since there is one unique lowest energy state, we simply need to calculate the inner products with this state. At first order, the energy correction is:
+\begin{align}
+    \bra{k_{\alpha}=\pi/a,\uparrow;\,k_{\alpha}=\pi/a,\downarrow}
+    \left(U\sum_{\alpha}n_{\alpha,\uparrow}n_{\alpha,\downarrow}+\frac{V_0}{2}\sum_{\alpha,\sigma}(-1)^{1+\alpha}n_{\alpha,\sigma}\right)
+    \ket{k_{\alpha}=\pi/a,\uparrow;\,k_{\alpha}=\pi/a,\downarrow}
+\end{align}
+We can explicity calculate the effect of the interacting and potential terms:
+\begin{align}
+    &\left(U\sum_{\alpha}n_{\alpha,\uparrow}n_{\alpha,\downarrow}+\frac{V_0}{2}\sum_{\alpha,\sigma}(-1)^{1+\alpha}n_{\alpha,\sigma}\right)
+    \ket{k_{\alpha}=\pi/a,\uparrow;\,k_{\alpha}=\pi/a,\downarrow}\\
+    =&\left(U\sum_{\alpha}n_{\alpha,\uparrow}n_{\alpha,\downarrow}+\frac{V_0}{2}\sum_{\alpha,\sigma}(-1)^{1+\alpha}n_{\alpha,\sigma}\right)
+    \frac{1}{2}\left[\ket{A,\uparrow;A,\downarrow}+\ket{B,\uparrow;B,\downarrow}
+    -\ket{A,\uparrow;B,\downarrow}-\ket{B,\uparrow;A,\downarrow}\right]\\
+    &=\frac{1}{2}\left[(U+V_0)\ket{A,\uparrow;A,\downarrow}+(U-V_0)\ket{B,\uparrow;B,\downarrow}\right]
+\end{align}
+Taking the inner product with the ground state then gives us:
+\begin{align}
+    \frac{1}{4}\left[(U+V_0)+(U-V_0)\right].
+\end{align}
+In the limit of $V_0\to0$ this gives us $U/2$ - which is the zeroth order perturbation to the exact ground state energy of the two site Hubbard model. \\
+
+We can now calculate the second order contribution. We need to calculate the inner-product with the excited hopping states $\ket{l}$ and keep track of the corresponding hopping eigenenergy $E_l$. There are two two types of states:
+\begin{enumerate}
+    \item The four states with particles in different ``$\alpha$-momentum'' states:  $\ket{k_\alpha=0,\sigma_1;k_{\alpha=\pi/a},\sigma_2}$, energy $E_l=0$ (excitation energyt $E_l-E_0=2t$)
+    \item The single state with both particles in the $\alpha=0$ state: $\ket{k_\alpha=0,\uparrow;k_{\alpha=\pi/a},\downarrow}$, energy $E_l=2t$ (excitation energy $E_l-E_0=4t$).
+\end{enumerate}
+The mixed ``$\alpha$-momentum'' states $\ket{k_\alpha=0,\sigma_1;k_{\alpha=\pi/a},\sigma_2}$ expand to:
+\begin{align}
+    \ket{k_\alpha=0,\sigma_1;k_{\alpha=\pi/a},\sigma_2}
+    =\frac{1}{2}\left[\ket{A,\sigma_1;A,\sigma_2}-\ket{B,\sigma_1;B,\sigma_2}
+    -\ket{A,\sigma_1;B,\sigma_2}+\ket{B,\sigma_1;A,\sigma_2}\right]
+\end{align}
+The interaction term evaluates to zero on these states because of the mixed sign between doubly occupied states. The potential term is only non-zero on the doubly occupied states, which only exists when $\sigma_1\neq\sigma_2$. On these states the potential term evaluates to 
+$\frac{1}{2}\left(V_0\ket{A,\sigma_1;A,\sigma_2}+V_0\ket{B,\sigma_1;B,\sigma_2}\right)$, and so when we take the inner product with the ground state, we get an extra factor of $1/2$ from the normalization factor for an overall contribution of $\frac{1}{4} 2V_0=\frac{V_0}{2}$.
+
+Conversely, the state $\ket{k_\alpha=0,\uparrow;k_{\alpha=0},\downarrow}$ expands to have the same sign in the doubly occupied states:
+\begin{align}
+    \ket{k_\alpha=0,\uparrow;k_{\alpha=0},\downarrow}
+    =\frac{1}{2}\left[\ket{A,\uparrow;A,\downarrow}+\ket{B,\uparrow;B,\downarrow}
+    +\ket{A,\uparrow;B,\downarrow}+\ket{B,\uparrow;A,\downarrow}\right],
+\end{align}
+which in turn means that the interaction term evaluates to $1/2(U)(\ket{A,\uparrow;A,\downarrow}+\ket{B,\uparrow;B,\downarrow})$. When we take the inner-product, the extra normalization factor means that this term evaluates to $\frac{1}{4}(2U)=U/2$. Putting these results together we can then write out the second order Schrieffer-Wolff Hamiltonian:
+\begin{align}
+    H_{0,0}&=\frac{1}{2}\sum_{l}\bra{0}(\hat{U}+\hat{V})\ket{l}\bra{l}((\hat{U}+\hat{V}))\ket{0}
+    \left(
+        \frac{1}{E_{0}-E_{l}}+\frac{1}{E_{0}-E_{l}}
+    \right)\\
+    &=\sum_{l}\bra{0}(\hat{U}+\hat{V})\ket{l}\bra{l}((\hat{U}+\hat{V}))\ket{0}
+    \left(
+        \frac{1}{E_{0}-E_{l}}
+    \right)\\
+    &=2
+    \frac{\bra{0}(\hat{U}+\hat{V})\ket{k_\alpha=0,\uparrow;k_\alpha=\pi/a,\downarrow}\bra{k_\alpha=0,\uparrow;k_\alpha=\pi/a,\downarrow}(\hat{U}+\hat{V})\ket{0}}
+    {-2t}\\
+    &+ \frac{\bra{0}(\hat{U}+\hat{V})\ket{k_\alpha=0,\uparrow;k_\alpha=0,\downarrow}\bra{k_\alpha=0,\uparrow;k_\alpha=0,\downarrow}(\hat{U}+\hat{V})\ket{0}}
+    {-4t}\\
+    &=-t\frac{((V_0/2)^2)}{-2t}-t\frac{(U/2)^2}{-4t}\\
+    &=-t\left[\frac{V_0^2}{8t^2}+\frac{U^2}{16t^2}\right].
+\end{align}
+So the energy to second order in the $t>>U\sim V_0$ limit is:
+\begin{equation}
+\boxed{
+    H_{0,0}=-t\left[\frac{V_0^2}{8t^2}+\frac{U^2}{16t^2}\right]
+}
+\end{equation}
+In the limit $V_0\to 0$ this recovers the two site result, as it should. 
+
+
+
+
+
+
+\section{Mismatched potential and interaction}
+We now consider the simplest case in which the periodicity of the interaction and the periodicity of the modulation are mismatched. We keep the potential unchanged, but change the interaction to cluster together momentum points separated by $\pi/2$ (quarter Brillouin Zone) (or, equivalently, we couple together next-nearest neighbours). Although the potential is unchanged, since this changes the clustering, this changes the form of the interaction in the momentum-space clusters. We have:
+\begin{equation}
+    \hat{V}=\frac{V_0}{2}\sum_{k}c^\dagger_{k+\pi,a}c_{k,a}+h.c.
+    =\frac{V_0}{2}\sum_{K}\sum_{a=1}^{2}c^\dagger_{K+\pi,a}c_{K,a}+h.c.
+\end{equation}
+This form follows from the fact that each $K$ cluster contains momentum points separated by a quarter RLV $\pi/2$, and so a $\pi$ hopping takes you into a new cluster. Schematically:
+\begin{figure}
+    \centering
+    \includegraphics[]{images/Screenshot 2025-06-12 at 21.57.26.png}
+    \caption{Caption}
+    \label{fig:enter-label}
+\end{figure}
+We again need to express the potential in terms of the new basis. To do this, let a superscript $\mu=1,2$ denote the $K$ and $K+\pi$ clusters. Inserting the basis transformation in each cluster, we have:
+\begin{align}
+    \hat{V}&=\frac{V_0}{2}\sum_{K}\sum_{a=1}^{2}c^\dagger_{K+\pi,a}c_{K,a}+h.c.
+    =\frac{V_0}{2}\sum_{K/2}\sum_{\alpha,\beta}\sum_{a=1}^{2}
+    e^{ik^0_a\cdot R^0_{\alpha}}e^{-ik^0_a\cdot R^0_{\beta}}c^{\dagger,\mu=2}_{\alpha}c^{\mu=1}_{\beta}\\
+    &=\frac{V_0}{2}\sum_{K/2}\sum_{\alpha,\beta}\sum_{\alpha=1}^{2}
+\delta_{\alpha,\beta}c^{\dagger,\mu=2}_{\alpha}c^{\mu=1}_{\alpha}+h.c.\\
+&=\frac{V_0}{2}\sum_{K/2}\sum_{\alpha=1}^{2}
+c^{\dagger,\mu=2}_{\alpha}c^{\mu=1}_{\alpha}
+\end{align}
+
+This means that we can write the Hamiltonian in terms of the momentum supercells as:
+
+\begin{equation}
+\boxed{
+    H=\sum_{K/2}
+    \left[\sum_{\alpha=1}^{n_c=2}\sum_{\mu}\sum_{\sigma}
+    \tilde t(K) c^{\dagger,\mu}_{\alpha+1,\sigma}c^\mu_{\alpha,\sigma}+h.c.
+     +n^\mu_{\alpha,\sigma}(\tilde\mu(K)-\mu_0)
+    +U\sum_{\alpha=1}^{n=2}n^\mu_{\alpha,\uparrow}n^\mu_{\alpha,\downarrow}
+    +\frac{V_0}{2}\sum_{\alpha}c^{\dagger,2}_{\alpha}c^1_\alpha+h.c..
+    \right]
+}
+\end{equation}
+Here we've abused notation to let $K/2$ mean the half of cluster labels $K$ that are distinct under the mixing induced by the potential. Using the same basis enumeration as in \cref{tab:two_particle_states}, but with an additional outer index for the momentum cluster $\mu$, the Hamiltonian kernel in the half-filled (4 particle) sector $\mathcal{H}(K)$ is given by:
+\begin{equation}
+    \mathcal{H}_{K}=
+    \begin{pmatrix}
+        H^{\mu=1}_{2} & \tfrac{V_0}{2}\mathds{1}_4\\
+         \tfrac{V_0}{2}\mathds{1}_4 & H^{\mu=2}_{2}
+    \end{pmatrix}
+\end{equation}
+We can then go through and solve this Hamiltonian in each particle and spin sector. 
+
+
+
+
+% TODO: I think this picture also makes it clear why GCE is better than canonical because you don't want to fix the filling for the two site shell?
+% \section{Code notes}
+\pagebreak
+\section{Questions}
+\begin{enumerate}
+    \item What makes Moire different from displaced chains? How much of Moire phenomenology can we capture in two misaligned 1D chains? What is the literature on this? Is it just the Rice-Mele model/SSH chain?
+    \item Are you sure it isn't better to just do everything in real-space? What advantage is this momentum space scheme giving you? Presumably because the momentum-point coupling is perturbative? But this is not enough because the interaction can still non-perturbatively couple clusters!
+\end{enumerate}
+
+
+
+\end{document}
