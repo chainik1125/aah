@@ -1,7 +1,7 @@
 [project]
-name = "mypkg"
+name = "aah"
 version = "0.0.1"
-description = "Sample repository using Apollo best engineering practices"
+description = "AAH v0: matched case energy"
 requires-python = ">=3.11"
 readme = "README.md"
 dependencies = [
@@ -13,69 +13,80 @@ dependencies = [
     "tqdm",
     "pytest",
     "ipykernel",
+    "plotly",
+    "numpy",
 ]
 
 [project.optional-dependencies]
-dev = [
-    "ruff",
-    "pyright",
-    "pre-commit",
-]
+
 
 [build-system]
 requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools]
-packages = ["mypkg"]
 
-[tool.ruff]
-line-length = 100
-fix = true
 
-[tool.ruff.lint]
-select = [
-    # pycodestyle
-    "E",
-    # Pyflakes
-    "F",
-    # pyupgrade
-    "UP",
-    # flake8-bugbear
-    "B",
-    # flake8-simplify
-    "SIM",
-    # isort
-    "I",
-]
 
-[tool.ruff.format]
+
+#Apollo stuff that I'm not going to use this time around
+
+#dev = [
+#    "ruff",
+#    "pyright",
+#    "pre-commit",
+#]
+
+
+#[tool.setuptools]
+#packages = ["aah"]
+
+#[tool.ruff]
+#line-length = 100
+#fix = true
+
+#[tool.ruff.lint]
+#select = [
+#    # pycodestyle
+#    "E",
+#    # Pyflakes
+#    "F",
+#    # pyupgrade
+#    "UP",
+#    # flake8-bugbear
+#    "B",
+#    # flake8-simplify
+#    "SIM",
+#    # isort
+#    "I",
+#]
+
+#[tool.ruff.format]
 # Enable reformatting of code snippets in docstrings.
-docstring-code-format = true
+#docstring-code-format = true
 
-[tool.ruff.isort]
-known-third-party = ["wandb"]
+#[tool.ruff.isort]
+#known-third-party = ["wandb"]
 
-[tool.pyright]
-include = ["mypkg", "tests"]
+#[tool.pyright]
+#include = ["aah", "tests"]
 
-strictListInference = true
-strictDictionaryInference = true
-strictSetInference = true
-reportFunctionMemberAccess = true
-reportUnknownParameterType = true
-reportIncompatibleMethodOverride = true
-reportIncompatibleVariableOverride = true
-reportInconsistentConstructorType = true
-reportOverlappingOverload = true
-reportConstantRedefinition = true
-reportImportCycles = true
-reportPropertyTypeMismatch = true
-reportMissingTypeArgument = true
-reportUnnecessaryCast = true
-reportUnnecessaryComparison = true
-reportUnnecessaryContains = true
-reportUnusedExpression = true
-reportMatchNotExhaustive = true
-reportShadowedImports = true
-reportPrivateImportUsage = false
+#strictListInference = true
+#strictDictionaryInference = true
+#strictSetInference = true
+#reportFunctionMemberAccess = true
+#reportUnknownParameterType = true
+#reportIncompatibleMethodOverride = true
+#reportIncompatibleVariableOverride = true
+#reportInconsistentConstructorType = true
+#reportOverlappingOverload = true
+#reportConstantRedefinition = true
+#reportImportCycles = true
+#reportPropertyTypeMismatch = true
+#reportMissingTypeArgument = true
+#reportUnnecessaryCast = true
+#reportUnnecessaryComparison = true
+#reportUnnecessaryContains = true
+#reportUnusedExpression = true
+#reportMatchNotExhaustive = true
+#reportShadowedImports = true
+#reportPrivateImportUsage = false
