@@ -15,6 +15,7 @@ dependencies = [
     "ipykernel",
     "plotly",
     "numpy",
+    "physics-tenpy",
 ]
 
 

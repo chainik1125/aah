@@ -1,28 +1,46 @@
 from pathlib import Path
-
-import torch
 import yaml
 from pydantic import BaseModel
-from torch import nn
+import numpy as np
 
-from aah.log import logger
+from log import logger
+
+from global_params import HamiltonianParams
 
 
-def save_model_and_config(config: BaseModel, save_dir: Path, model: nn.Module, epoch: int) -> None:
-    """Save the model to disk. Also save the config file if it doesn't exist.
+def calculate_dispersion_from_hopping(hamiltonian_params:HamiltonianParams):
+    dispersion_dict={}
+    for hopping_key,hopping_tuple in hamiltonian_params.hoppings.items():
+        hopping_separation=hopping_tuple[1]
+        hopping_value=hopping_tuple[0]
 
-    Args:
-        config: The config object. Saved if save_dir / "config.yaml" doesn't already exist.
-        save_dir: The directory to save the model and config to.
-        model: The model to save.
-        epoch: The current epoch (used in the model filename).
+        def dispersion(k):
+            return 2*hopping_value*np.cos(k*hopping_separation)
+        
+        dispersion_dict[hopping_key]=dispersion
+    
+    return dispersion_dict
+
+#for now, let me just stick to the NN hopping case
+
+def cosine_dispersion(k_point):
+    return 2*np.cos(k_point)
+
+def mu_tilde_coefficient(hopping,cluster_basis,dispersion=cosine_dispersion):
     """
-    save_dir.mkdir(parents=True, exist_ok=True)
-    if not (save_dir / "config.yaml").exists():
-        with open(save_dir / "config.yaml", "w") as f:
-            yaml.dump(config, f)
-        logger.info("Saved config to %s", save_dir / "config.yaml")
+    The onsite hopping coefficient for the (\delta_k=0) term in the alpha basis.
+    
+    """
 
-    model_file = save_dir / f"model_epoch_{epoch + 1}.pt"
-    torch.save(model.state_dict(), model_file)
-    logger.info("Saved model to %s", model_file)
+    n_cluster_sites=cluster_basis.cluster_k_points.shape[0]
+    nearest_neighbor_hopping=hopping
+
+    return (1/(n_cluster_sites))*np.array([nearest_neighbor_hopping*dispersion(k) for k in cluster_basis.cluster_k_points]).sum()
+
+# def t_tilde(cluster_basis,dispersion=cosine_dispersion):
+#     """
+#     The nearest neighbor hopping term in the alpha basis.
+#     """
+#     n_cluster_sites=cluster_basis.n_cluster_sites.shape[0]
+
+#     return (1/(n_cluster_sites))*np.array([dispersion(k) for k in cluster_basis.cluster_k_points]).sum()

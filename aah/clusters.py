@@ -17,6 +17,10 @@ logger=logging.getLogger(__name__)
 # If you want debug output for just this module:
 #logging.getLogger("aah.kblock").setLevel(logging.INFO)
 
+
+#TODO: You need to add Hamiltonian parameters module, which includes
+#the hoppings, interactions, modulation etc...
+
 class ClusterExperiment:
     def __init__(self,
                 cluster_size:int,
@@ -39,6 +43,9 @@ class ClusterExperiment:
             raise ValueError("lattice_points must be positive")
         if self.cluster_k_generator <= 0:
             raise ValueError("cluster_k_generator must be positive")
+        
+        
+            
 
     def generate_clusters(self,return_indices:bool=False)->np.ndarray:
         """Tile the 1-D Brillouin zone into clusters.
@@ -55,6 +62,8 @@ class ClusterExperiment:
             defaults to ``1`` (scalar k).  The array is trimmed in case the last
             cluster would overrun the grid.
         """
+        
+
         
         used_indices: set[int] = set()
         cluster_list=[]
