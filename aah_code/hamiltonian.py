@@ -62,9 +62,10 @@ class Hubbard1D(CouplingMPOModel, NearestNeighborModel):
 			mu_tilde=mu_tilde_coefficient(t,basis_object,dispersion=cosine_dispersion)
 
 			#Add the mu_tilde term and the mu_0 term
+			mu_eff=mu_0-mu_tilde
 			for alpha in range(len(self.lat.unit_cell)):
-				self.add_onsite(mu_tilde-mu_0, alpha, 'Nu')  # chemical potential n_up
-				self.add_onsite(mu_tilde-mu_0, alpha, 'Nd')  # chemical potential n_down
+				self.add_onsite(-mu_eff, alpha, 'Nu')  # chemical potential n_up
+				self.add_onsite(-mu_eff, alpha, 'Nd')  # chemical potential n_down
 		
 			#Add the t_tilde term
 
@@ -101,12 +102,20 @@ class Hubbard1D(CouplingMPOModel, NearestNeighborModel):
 			for alpha in range(len(self.lat.unit_cell)):
 				self.add_onsite(U, alpha, 'NuNd')  # Hubbard n_up n_down term
 				
-			#Add the onsite V
-			for alpha in range(len(self.lat.unit_cell)):
-				if abs(V) > 0:        # i = 0 … L-1
-					sign =  +V if (alpha % 2 == 0) else -V   # even sites +V, odd sites –V
-					self.add_onsite(sign, alpha, 'Nu')       # n↑ part
-					self.add_onsite(sign, alpha, 'Nd')
+			# #Add the onsite V
+			# for alpha in range(len(self.lat.unit_cell)):
+			# 	if abs(V) > 0:        # i = 0 … L-1
+			# 		sign =  +V/2 if (alpha % 2 == 0) else -V/2   # even sites +V, odd sites –V
+			# 		self.add_onsite(sign, alpha, 'Nu')       # n↑ part
+			# 		self.add_onsite(sign, alpha, 'Nd')
+
+			if abs(V) > 0:
+				# shape (L_cells,)  →  [+V/2, -V/2, +V/2, …]
+				stagger = np.asarray([ +V/2 if (x % 2 == 0) else -V/2
+									for x in range(L_cells) ])
+				for alpha in range(len(self.lat.unit_cell)):      # usually alpha == 0
+					self.add_onsite(stagger, alpha, 'Nu')         # n↑   term
+					self.add_onsite(stagger, alpha, 'Nd')         # n↓   term
 
 		else:
 			raise ValueError("No basis class provided")

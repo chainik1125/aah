@@ -6,6 +6,7 @@ from aah_code.hamiltonian import Hubbard1D
 from aah_code.global_params import StatesParams, HamiltonianParams
 import tenpy as tp
 import logging
+from tenpy.algorithms import exact_diag
 
 
 
@@ -15,11 +16,37 @@ log = logging.getLogger(__name__)
 
 
 
+
+
 class TestHamiltonian:
+
+
+    def make_test_clusters(self,state_params,test_type:str='default'):
+        """
+        make the initial cluster points t
+        """
+
+        rand_point=np.random.rand()*2*np.pi
+        special_k_points=[np.array([[-np.pi],[0]]), #\mu_0=0
+                np.array([[rand_point],[rand_point+np.pi]]), #\t_tilde=0
+                np.array([[-np.pi],[np.pi]]), #\t_tilde=0
+                np.array([[rand_point],[rand_point+2*np.pi]]), #\t_tilde=0
+                ]
+        if test_type=='default':
+            rand_points=3
+            random_k_points=[np.array([[-np.pi+np.random.rand()*2*np.pi],[-np.pi+np.random.rand()*2*np.pi]]) for _ in range(rand_points)]
+
+        cluster_k_points=special_k_points+random_k_points
+        #est_clusters=[LocalClusterBasis(k_points) for k_points in cluster_k_points]
+        
+        return cluster_k_points
+    
     def test_hamiltonian_hermitian(self):
         """Test that the Hamiltonian is Hermitian."""
         state_params=StatesParams(spin_states=2)
         physical_params=HamiltonianParams(U=3.0,V=2.0,hopping=1.0)
+
+
         cluster_k_points=np.array([[-np.pi],
                                 [0]])
         test_basis=LocalClusterBasis(cluster_k_points,state_params)
@@ -189,7 +216,8 @@ class TestHamiltonian:
 
             alpha_k=np.array([[0],[np.pi]])
             #mu_tilde=(1/2)*(2*t*np.cos(cluster_k_points)).sum()
-            t_tilde=(1/2)*(2*t*np.cos(cluster_k_points[0])-2*t*np.cos(cluster_k_points[1]))
+            t_tilde=(1/2)*(2*t*np.cos(cluster_k_points[0])-2*t*np.cos(cluster_k_points[1])).sum()
+            
             mu_0=ham_dict['mu']
 
 
@@ -211,7 +239,78 @@ class TestHamiltonian:
             
             
     
-    def test_half_filling(self):
+    def test_twoparticle_with_V(self):
         """
-        test that the 
+        test that the two particle ground state energy is correct with V
         """
+        state_params=StatesParams(spin_states=2)
+        
+        #physical_params=HamiltonianParams(U=0,V=2,hopping=1)
+        t=1
+        U=100
+        V=10
+
+        test_clusters=self.make_test_clusters(state_params,test_type='default')
+    
+        for test_cluster_ks in test_clusters:
+            
+            cluster_object=LocalClusterBasis(test_cluster_ks,state_params)
+
+            mu_tilde=(1/2)*(2*t*np.cos(test_cluster_ks)).sum()
+            
+            mu_0=U/2+mu_tilde
+
+            ham_dict = {
+                'basis_class': cluster_object,
+                'V': V,
+                't': t,
+                'U': U,
+                'mu':mu_0,
+            }
+
+            test_ham=Hubbard1D(ham_dict)
+            
+            test_ham_mat=tp.algorithms.exact_diag.get_numpy_Hamiltonian(test_ham)
+            test_ham_eigvals,test_ham_eigvecs=np.linalg.eigh(test_ham_mat)
+
+            # 2) dense ED
+            ed = exact_diag.ExactDiag(test_ham)                 # solver instance  :contentReference[oaicite:0]{index=0}
+            ed.build_full_H_from_bonds() 
+            ed.full_diagonalization()                    # fills ed.full_H  :contentReference[oaicite:1]{index=1}
+            E0, psi_vec = ed.groundstate()    
+            
+            psi_mps = ed.full_to_mps(psi_vec)               # returns E0, eigen-vector  :contentReference[oaicite:2]{index=2}
+
+            n_up   = psi_mps.expectation_value('Nu')     # array, one value per site
+            n_down = psi_mps.expectation_value('Nd')
+            n_tot  = n_up + n_down                  # or psi.expectation_value('Ntot')
+
+            log.debug(f'Number expectations for ham GS: n_up: {n_up}, n_down: {n_down}, n_tot: {n_tot}')
+
+            #log.debug(f'Number expectations for ham GS: n_up: {n_up}, n_down: {n_down}, n_tot: {n_tot}')
+
+            t_tilde=(1/2)*(2*t*np.cos(test_cluster_ks[0])-2*t*np.cos(test_cluster_ks[1])).sum()
+
+            log.debug(f'shape t_tilde: {t_tilde.shape}')
+
+            two_particle_spin_zero_sector=np.array([[U+V,-t_tilde,t_tilde,0],
+                                                    [-t_tilde,0,0,t_tilde],
+                                                    [t_tilde,0,0,-t_tilde],
+                                                    [0,t_tilde,-t_tilde,U-V]])
+            
+            
+            
+            two_particle_spin_zero_sector=two_particle_spin_zero_sector-2*(mu_0-mu_tilde)*np.eye(np.shape(two_particle_spin_zero_sector)[0])
+
+
+            analytic_two_particle_gs_V_zero=2*mu_tilde-2*mu_0+(1/2)*(U-np.sqrt(U**2+(4*t_tilde)**2))
+
+            log.debug(f'two particle exact hermitian? {np.allclose(two_particle_spin_zero_sector,two_particle_spin_zero_sector.conj().T)}')
+            
+            exact_gs=np.linalg.eigvals(two_particle_spin_zero_sector).min()
+
+            log.debug(f'Cluster Ham GS Energy: {test_ham_eigvals[0]}, Analytic energy: {exact_gs}, V zero energy: {analytic_two_particle_gs_V_zero}')
+
+            break
+
+        
