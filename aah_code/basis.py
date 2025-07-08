@@ -4,7 +4,7 @@ import itertools
 import logging
 import tenpy as tp
 from tenpy.models import lattice
-from global_params import StatesParams
+from aah_code.global_params import StatesParams
 
 
 

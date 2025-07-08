@@ -6,9 +6,9 @@ There's a slightly tricky issue of how the Hamiltonian interacts with the cluste
 since you're really defining an interaction cluster rather than a full Hamiltonian cluster.
 """
 
-from basis import LocalClusterBasis
-from global_params import StatesParams,HamiltonianParams
-from utils import mu_tilde_coefficient,cosine_dispersion
+from aah_code.basis import LocalClusterBasis
+from aah_code.global_params import StatesParams,HamiltonianParams
+from aah_code.utils import mu_tilde_coefficient,cosine_dispersion
 from tenpy.models import CouplingMPOModel,NearestNeighborModel,lattice
 import tenpy as tp
 import numpy as np

@@ -3,9 +3,9 @@ import yaml
 from pydantic import BaseModel
 import numpy as np
 
-from log import logger
+from aah_code.log import logger
 
-from global_params import HamiltonianParams
+from aah_code.global_params import HamiltonianParams
 
 
 def calculate_dispersion_from_hopping(hamiltonian_params:HamiltonianParams):
