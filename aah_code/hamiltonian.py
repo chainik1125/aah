@@ -86,8 +86,11 @@ class Hubbard1D(CouplingMPOModel, NearestNeighborModel):
 					for alpha in range(len(self.lat.unit_cell)):
 						#t_tilde = 2 * t * np.cos(dx * 2 * np.pi / L_cells) / L_cells
 						cluster_k_points=basis_object.cluster_k_points
-						#The 1/2 is there because I counted twice when adding the hc but also having a real coefficient.
-						t_tilde=(1/L_cells)*np.array([2*t*np.cos(cluster_k_points[j])*(1/2)*2*t*np.cos(dx*2*np.pi*j/L_cells) for j in range(L_cells)]).sum()
+						#There are two factor of 1/2:
+						#1. Comes from the 1/2 in the t_tilde definition
+						#2. Comes from double counting when including the hc - if you get confused about
+						# this again remember the two site model hopping eigenenergies are not \pm 2t but \pm t !
+						t_tilde=(1/2)*(1/L_cells)*np.array([2*t*np.cos(cluster_k_points[j])*(1/2)*2*t*np.cos(dx*2*np.pi*j/L_cells) for j in range(L_cells)]).sum()
 						self.add_coupling(t_tilde, alpha, 'Cdd', alpha, 'Cd', dx, plus_hc=True)
 						self.add_coupling(t_tilde, alpha, 'Cdu', alpha, 'Cu', dx, plus_hc=True)
 			
