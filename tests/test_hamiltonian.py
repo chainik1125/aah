@@ -128,6 +128,86 @@ class TestHamiltonian:
         for i, chosen_k_points in enumerate(sampled_cluster_k_points):
             cluster_k_points=chosen_k_points
             test_basis=LocalClusterBasis(cluster_k_points,state_params)
+
+            ham_dict = {
+                'basis_class': test_basis,
+                'V': physical_params.V,
+                't': physical_params.hopping,
+                'mu': 0,
+                'U': physical_params.U,
+            }
+
+            test_ham=Hubbard1D(ham_dict)
+            test_ham_mat=tp.algorithms.exact_diag.get_numpy_Hamiltonian(test_ham)
+            test_ham_eigvals,test_ham_eigvecs=np.linalg.eigh(test_ham_mat)
+
+            #One particle sector...
+
+    def test_two_particle_gs(self):
+        """
+        Test the two particle limit. 
+        Note that to run the same half-filling argument
+        we need to add mu_tilde onto mu_0=U/2 otherwise you can't guarantee 
+        half-filling (of course in general we can find the ground state we'd just have
+        to do each particle sector indiviudally and take the min.)
+
+
+        """
+        state_params=StatesParams(spin_states=2)
+        t=1
+        U=3
+        
+        physical_params=HamiltonianParams(U=U,V=0,hopping=t)
+
+        
+        
+
+        sampled_cluster_k_points=[np.array([[-np.pi],[0]]),
+                        np.array([[0],[2*np.pi]]),
+                        np.array([[np.random.rand()*2*np.pi],[np.random.rand()*2*np.pi]]),
+                        np.array([[np.random.rand()*2*np.pi],[np.random.rand()*2*np.pi]]),
+                        np.array([[np.random.rand()*2*np.pi],[np.random.rand()*2*np.pi]])
+                        ]
+
+        for i, chosen_k_points in enumerate(sampled_cluster_k_points):
+            cluster_k_points=chosen_k_points
+            test_basis=LocalClusterBasis(cluster_k_points,state_params)
+
+            mu_tilde=(1/2)*(2*t*np.cos(cluster_k_points)).sum()
+
+            ham_dict = {
+                'basis_class': test_basis,
+                'V': physical_params.V,
+                't': physical_params.hopping,
+                'U': physical_params.U,
+                'mu':physical_params.U/2+mu_tilde,
+            }
+
+            test_ham=Hubbard1D(ham_dict)
+            test_ham_mat=tp.algorithms.exact_diag.get_numpy_Hamiltonian(test_ham)
+            test_ham_eigvals,test_ham_eigvecs=np.linalg.eigh(test_ham_mat)
+
+            alpha_k=np.array([[0],[np.pi]])
+            #mu_tilde=(1/2)*(2*t*np.cos(cluster_k_points)).sum()
+            t_tilde=(1/2)*(2*t*np.cos(cluster_k_points[0])-2*t*np.cos(cluster_k_points[1]))
+            mu_0=ham_dict['mu']
+
+
+
+
+
+            print(f'U={U}, mu_tilde={mu_tilde}, mu_0={mu_0}, t_tilde={t_tilde}')
+            analytic_two_particle_gs=2*mu_tilde-2*mu_0+(1/2)*(U-np.sqrt(U**2+(4*t_tilde)**2))
+            #analytic_two_particle_gs=analytic_two_particle_gs*np.heaviside(0-analytic_two_particle_gs,0)
+
+            log.debug(f'Cluster Ham GS Energy: {test_ham_eigvals[0]}, Analytic energy: {analytic_two_particle_gs}')
+            
+            np.testing.assert_array_almost_equal(
+                test_ham_eigvals[0],
+                analytic_two_particle_gs,
+                err_msg="Two-particle ground state energy is not recovered"
+            )
+            
             
             
     

@@ -53,7 +53,7 @@ class Hubbard1D(CouplingMPOModel, NearestNeighborModel):
 		# default is U=1, t=1
 		U = model_params.get('U', 0.0)
 		t = model_params.get('t', 0.0)
-		mu = model_params.get('mu', 0.0)
+		mu_0 = model_params.get('mu', 0.0)
 		V=model_params.get('V', 0.0)
 		L_cells = self.lat.Ls[0] 
 		# nearest neighbor hopping -t
@@ -61,10 +61,10 @@ class Hubbard1D(CouplingMPOModel, NearestNeighborModel):
 			basis_object=model_params['basis_class']
 			mu_tilde=mu_tilde_coefficient(t,basis_object,dispersion=cosine_dispersion)
 
-			#Add the mu_tilde term
+			#Add the mu_tilde term and the mu_0 term
 			for alpha in range(len(self.lat.unit_cell)):
-				self.add_onsite(mu_tilde, alpha, 'Nu')  # chemical potential n_up
-				self.add_onsite(mu_tilde, alpha, 'Nd')  # chemical potential n_down
+				self.add_onsite(mu_tilde-mu_0, alpha, 'Nu')  # chemical potential n_up
+				self.add_onsite(mu_tilde-mu_0, alpha, 'Nd')  # chemical potential n_down
 		
 			#Add the t_tilde term
 
@@ -93,6 +93,9 @@ class Hubbard1D(CouplingMPOModel, NearestNeighborModel):
 						t_tilde=(1/2)*(1/L_cells)*np.array([2*t*np.cos(cluster_k_points[j])*(1/2)*2*t*np.cos(dx*2*np.pi*j/L_cells) for j in range(L_cells)]).sum()
 						self.add_coupling(t_tilde, alpha, 'Cdd', alpha, 'Cd', dx, plus_hc=True)
 						self.add_coupling(t_tilde, alpha, 'Cdu', alpha, 'Cu', dx, plus_hc=True)
+			
+			
+			
 			
 			#Add the onsite alpha U
 			for alpha in range(len(self.lat.unit_cell)):

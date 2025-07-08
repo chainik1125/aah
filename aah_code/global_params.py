@@ -34,6 +34,7 @@ class HamiltonianParams:
     U:float
     V:float
     hopping:float=1.0
+    mu_0:float=0.0
 
 
 
