@@ -10,18 +10,23 @@ To use the logger, import it in any module and use it as follows:
 """
 
 import logging
+import os
 from logging.config import dictConfig
 from pathlib import Path
 
 DEFAULT_LOGFILE = Path(__file__).resolve().parent.parent / "logs" / "logs.log"
 
 
-def setup_logger(logfile: Path = DEFAULT_LOGFILE) -> logging.Logger:
+def setup_logger(logfile: Path = DEFAULT_LOGFILE, log_level: str = None) -> logging.Logger:
     """Setup a logger to be used in all modules in the library.
 
     Sets up logging configuration with a console handler and a file handler.
     Console handler logs messages with INFO level, file handler logs WARNING level.
     The root logger is configured to use both handlers.
+
+    Args:
+        logfile: Path to the log file
+        log_level: Override logging level (checks LOGLEVEL env var if None)
 
     Returns:
         logging.Logger: A configured logger object.
@@ -32,6 +37,16 @@ def setup_logger(logfile: Path = DEFAULT_LOGFILE) -> logging.Logger:
         >>> logger.info("Info message")
         >>> logger.warning("Warning message")
     """
+    # Determine log level from parameter, environment variable, or default
+    if log_level is None:
+        log_level = os.environ.get('LOGLEVEL', 'INFO').upper()
+    else:
+        log_level = log_level.upper()
+    
+    # Validate log level
+    if log_level not in ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']:
+        log_level = 'INFO'
+    
     if not logfile.parent.exists():
         logfile.parent.mkdir(parents=True, exist_ok=True)
 
@@ -47,7 +62,7 @@ def setup_logger(logfile: Path = DEFAULT_LOGFILE) -> logging.Logger:
             "console": {
                 "class": "logging.StreamHandler",
                 "formatter": "default",
-                "level": "INFO",
+                "level": log_level,
             },
             "file": {
                 "class": "logging.FileHandler",
@@ -58,7 +73,7 @@ def setup_logger(logfile: Path = DEFAULT_LOGFILE) -> logging.Logger:
         },
         "root": {
             "handlers": ["console", "file"],
-            "level": "INFO",
+            "level": log_level,
         },
     }
 
