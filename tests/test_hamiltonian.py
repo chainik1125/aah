@@ -247,8 +247,8 @@ class TestHamiltonian:
         
         #physical_params=HamiltonianParams(U=0,V=2,hopping=1)
         t=1
-        U=100
-        V=10
+        U=10
+        V=50
 
         test_clusters=self.make_test_clusters(state_params,test_type='default')
     
@@ -311,6 +311,15 @@ class TestHamiltonian:
 
             log.debug(f'Cluster Ham GS Energy: {test_ham_eigvals[0]}, Analytic energy: {exact_gs}, V zero energy: {analytic_two_particle_gs_V_zero}')
 
-            break
+            try:
+                np.testing.assert_array_almost_equal(
+                    test_ham_eigvals[0],
+                    exact_gs,
+                    err_msg="Two-particle ground state energy is not recovered"
+                )
+                log.info(f"✓ Test PASSED for {test_cluster_ks}. Expected energy: {exact_gs}, Actual energy: {test_ham_eigvals[0]}, error: {100*abs(test_ham_eigvals[0]-exact_gs)/abs(exact_gs)}%")
+            except AssertionError as e:
+                log.error(f"✗ Test FAILED for {test_cluster_ks}. Expected energy: {exact_gs}, Actual energy: {test_ham_eigvals[0]}, error: {100*abs(test_ham_eigvals[0]-exact_gs)/abs(exact_gs)}%")
+                raise AssertionError(f"Energy mismatch for {test_cluster_ks}. Expected: {exact_gs}, Got: {test_ham_eigvals[0]}") from e
 
         

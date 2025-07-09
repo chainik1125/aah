@@ -5,15 +5,19 @@ from a template of values.
 There's a slightly tricky issue of how the Hamiltonian interacts with the clusters
 since you're really defining an interaction cluster rather than a full Hamiltonian cluster.
 """
-
+import logging
+from aah_code.clusters import ClusterExperiment
 from aah_code.basis import LocalClusterBasis
 from aah_code.global_params import StatesParams,HamiltonianParams
 from aah_code.utils import mu_tilde_coefficient,cosine_dispersion
 from tenpy.models import CouplingMPOModel,NearestNeighborModel,lattice
 import tenpy as tp
+from tenpy.algorithms import exact_diag
 import numpy as np
 import matplotlib.pyplot as plt
+from typing import Union
 
+logger=logging.getLogger(__name__)
 
 
 class Hubbard1D(CouplingMPOModel, NearestNeighborModel):
@@ -81,7 +85,7 @@ class Hubbard1D(CouplingMPOModel, NearestNeighborModel):
 				# 		self.add_coupling(t_tilde, alpha, 'Cdd', beta, 'Cd', dx, plus_hc=True)  # Cdagger_down C_down + h.c.
 				# 		self.add_coupling(t_tilde, alpha, 'Cdu', beta, 'Cu', dx, plus_hc=True)  # Cdagger_up C_up + h.c.
 
-				         # number of unit cells in the 1-D chain:contentReference[oaicite:6]{index=6}
+						 # number of unit cells in the 1-D chain:contentReference[oaicite:6]{index=6}
 				for dx in range(1, L_cells//2+1):      # 1 … L_cells-1   (dx = 0 already handled)
 					# here beta could be alpha (same orbital) or something else
 					for alpha in range(len(self.lat.unit_cell)):
@@ -119,7 +123,135 @@ class Hubbard1D(CouplingMPOModel, NearestNeighborModel):
 
 		else:
 			raise ValueError("No basis class provided")
+
+class SpectrumSolver():
+	"""
+	Class that will solve for the spectrum
+	save: either false or folder path
+	"""
+	def __init__(self,hamiltonian,cluster_object:LocalClusterBasis,solver:str='tenpy_ED',states_retained:Union[int,'all']='all',save:Union[bool,str]=False):
+		self.hamiltonian=hamiltonian
+		self.solver=solver
+		self.states_retained=states_retained
+		self.cluster_object=cluster_object
+		self.save=save
+
+	def solve_spectrum(self):
+		if self.solver=='tenpy_ED':
+			#np_ham=tp.algorithms.exact_diag.get_numpy_Hamiltonian(self.hamiltonian)
+			ed = exact_diag.ExactDiag(self.hamiltonian)                 # solver instance  :contentReference[oaicite:0]{index=0}
+			ed.build_full_H_from_bonds() 
+			E,V=ed.full_diagonalization()                    # fills ed.full_H  :contentReference[oaicite:1]{index=1}
+			#E0, psi_vec = ed.groundstate()
+			#
+			eigvals=[]
+			eigvecs=[]
+			n_ups=[]
+			n_downs=[]
+			for i,E_i in enumerate(eigvals):
+				psi_vec=V[...,i]
+				psi_mps=ed.full_to_mps(psi_vec)
+				n_up=psi_mps.expectation_value('Nu')
+				n_down=psi_mps.expectation_value('Nd')
+				eigvals.append(E_i)
+				eigvecs.append(psi_vec)
+				n_ups.append(n_up)
+				n_downs.append(n_down)
+			n_ups=np.stack(n_ups,axis=0)
+			n_downs=np.stack(n_downs,axis=0)
+			n_tot=n_ups+n_downs
+			return eigvals,eigvecs,n_ups,n_downs,n_tot
+			#TODO:add functionality to efficiently get smaller number of total states.
+
+		else:
+			raise ValueError(f'Solver {self.solver} not implemented yet')
 		
+#Maybe I'll leave this for later
+#class SpectrumContainer():
+
+class FullSpectrum():
+	"""
+	Class to get the full spectrum of the Hamiltonian
+	None temperature is zero temperature
+	"""
+	def __init__(self,clustered_k_points:np.ndarray,state_params:StatesParams,physical_params:HamiltonianParams,temperature:Union[None,float]=None):
+		self.clustered_k_points=clustered_k_points
+		self.temperature=temperature
+
+		
+
+	def get_full_spectrum(self):
+		k_points=[]
+		energy_spectrum=[]
+		number_spectrum=[]
+		spin_spectrum=[]
+		for cluster_k in self.clustered_k_points:
+			cluster_object=LocalClusterBasis(cluster_k,state_params)
+			hamiltonian_object=Hubbard1D({'basis_class':cluster_object,
+											'V':physical_params.V,
+											't':physical_params.hopping,
+											'mu':0,
+											'U':physical_params.U,
+											})
+			spectrum_solver=SpectrumSolver(hamiltonian_object,cluster_object)
+			eigvals,eigvecs,n_ups,n_downs,n_tot=spectrum_solver.solve_spectrum()
+			k_points.append(cluster_k)
+			energy_spectrum.append(eigvals)
+			number_spectrum.append(n_tot)
+			spin_spectrum.append(np.array([n_ups,n_downs]))
+		
+		k_points=np.stack(k_points,axis=0)
+		energy_spectrum=np.stack(energy_spectrum,axis=0)
+		number_spectrum=np.stack(number_spectrum,axis=0)
+		spin_spectrum=np.stack(spin_spectrum,axis=0)
+
+		return k_points,energy_spectrum,number_spectrum,spin_spectrum
+		
+
+	def get_cluster_thermodynamic_expectations(self,full_spectrum_4tuple:tuple,temperature:Union[None,float]=None):
+		cluster_energy_expectations=[]
+		cluster_number_expectations=[]
+		cluster_spin_expectations=[]
+
+		k_points,full_energy_spectrum,full_number_spectrum,full_spin_spectrum=full_spectrum_4tuple
+
+		for i,k_point in enumerate(k_points):
+			energy_spectrum=full_energy_spectrum[i]
+			number_spectrum=full_number_spectrum[i]
+			spin_spectrum=full_spin_spectrum[i]
+
+			if temperature is None:
+				logger.info('Temperature is None - returning zero temperature expectations')
+				cluster_energy_argmin=np.argmin(energy_spectrum,axis=-1)
+				cluster_energy_expectations.append(energy_spectrum[cluster_energy_argmin])
+				cluster_number_expectations.append(number_spectrum[cluster_energy_argmin])
+				cluster_spin_expectations.append(spin_spectrum[cluster_energy_argmin])
+			else:
+				logger.info(f'Temperature is {temperature} - returning temperature dependent expectations')
+				beta=1/temperature
+				#TODO:CHECK!! I think you DONT include mu_0 N if you already added this 
+				#term to the Hamiltonian when finding the energies
+				sum_partition_function=np.sum(np.exp(-beta*(energy_spectrum)))
+				cluster_energy_expectations.append(np.sum(energy_spectrum*np.exp(-beta*energy_spectrum))/sum_partition_function)
+				cluster_number_expectations.append(np.sum(number_spectrum*np.exp(-beta*energy_spectrum))/sum_partition_function)
+				cluster_spin_expectations.append(np.sum(spin_spectrum*np.exp(-energy_spectrum/temperature))/sum_partition_function)
+		
+		system_energy=np.sum(cluster_energy_expectations)
+		system_number=np.sum(cluster_number_expectations)
+		system_spin=np.sum(cluster_spin_expectations)
+
+		system_expectations=(system_energy,system_number,system_spin)
+		cluster_expectations=(cluster_energy_expectations,cluster_number_expectations,cluster_spin_expectations)
+		
+		return system_expectations,cluster_expectations
+	
+
+
+				
+
+
+	
+	
 		
 	
 
@@ -146,7 +278,11 @@ if __name__ == "__main__":
 	
 	test_ham=Hubbard1D(ham_dict)
 
-	print(vars(test_ham.all_coupling_terms()))
+	#print(vars(test_ham.all_coupling_terms()))
+
+	#test the full spectrum code
+	lattice_object=ClusterExperiment(test_basis,physical_params)
+	full_spectrum=FullSpectrum(lattice_object,state_params,physical_params)
 	
 
 
