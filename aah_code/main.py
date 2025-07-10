@@ -531,8 +531,12 @@ def U_V_difference_heatmap(U_values,V_values,include_twosite=False):
 
 
 if __name__ == "__main__":
-    U_values=np.linspace(0,5,10)
-    V_values=np.linspace(0,5,10)
-    U_V_difference_heatmap(U_values,V_values,include_twosite=True).show()
+    U_values=np.linspace(0,5,2)
+    V_values=np.linspace(0,5,2)
+    fig = U_V_difference_heatmap(U_values,V_values,include_twosite=True)
+    
+    # Save as HTML file instead of showing interactively
+    fig.write_html("heatmap_comparison.html")
+    print("Heatmap saved as 'heatmap_comparison.html'")
 
     #compare_half_filling_U_fixed_V(U_values,V=2)

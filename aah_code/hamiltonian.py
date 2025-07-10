@@ -18,6 +18,10 @@ import matplotlib.pyplot as plt
 from typing import Union
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import plotly.io as pio
+
+# Set Plotly to use browser renderer to avoid nbformat issues
+pio.renderers.default = "browser"
 
 
 logger=logging.getLogger(__name__)
@@ -43,17 +47,18 @@ class Hubbard1D(CouplingMPOModel, NearestNeighborModel):
 
 	# Set 1D lattice
 	def init_lattice(self, model_params):
-		# if 'basis_class' in model_params:
-		# 	lat=model_params['basis_class'].init_cluster_lattice()
-		if False:
-			pass
-		else:
-			L = model_params['L'] # size
+		if 'basis_class' in model_params:
+			# Use cluster size from basis_class
+			L = len(model_params['basis_class'].cluster_k_points)
 			bc = 'periodic'  # always use 'open'
 			bc_MPS = 'finite'  # 'infinite' does iDMRG (still use open in 'bc')
 			lat = lattice.Chain(L=L, bc=bc, bc_MPS=bc_MPS, site=self.init_sites(model_params))
-			#return lat
-			#raise Warning("No basis class provided - using default chain with period chain bc and finite MPS ")
+		else:
+			L = model_params.get('L', 4) # size with default
+			bc = 'periodic'  # always use 'open'
+			bc_MPS = 'finite'  # 'infinite' does iDMRG (still use open in 'bc')
+			lat = lattice.Chain(L=L, bc=bc, bc_MPS=bc_MPS, site=self.init_sites(model_params))
+			raise Warning("No basis class provided - using default chain with period chain bc and finite MPS ")
 		
 		return lat
 
@@ -523,11 +528,11 @@ def test_quick_mismatched(lattice_points,cluster_size,physical_params):
 
 	full_spectrum_obj=FullSpectrum(None,state_params,physical_params,None)
 	system_expectations,cluster_expectations=full_spectrum_obj.get_cluster_thermodynamic_expectations(spectra_4tuple,None)
-
-	print(f"system energy density: {system_expectations[0]/lattice_points}",
-	   	f"system energy density mu_subtracted: {(system_expectations[0]+system_expectations[1]*physical_params.mu_0)/lattice_points} "
-	   	f"system filling density: {system_expectations[1]/lattice_points}",
-		f"system spin density:{system_expectations[2]/lattice_points}")
+	return system_expectations,cluster_expectations
+	# print(f"system energy density: {system_expectations[0]/lattice_points}",
+	#    	f"system energy density mu_subtracted: {(system_expectations[0]+system_expectations[1]*physical_params.mu_0)/lattice_points} "
+	#    	f"system filling density: {system_expectations[1]/lattice_points}",
+	# 	f"system spin density:{system_expectations[2]/lattice_points}")
 
 
 	
@@ -629,9 +634,246 @@ def test_hamiltonian_inspection():
 
 
 def quick_spectrum_test_vary_U(U_values,V):
-	fig=make_subplots(rows=1,cols=2)
+	fig=make_subplots(
+		rows=1, cols=2,
+		subplot_titles=['Energy vs U', 'Filling vs U']
+	)
+	lattice_points=16
+	cluster_size=2
+	subtracted_energies_4site=[]
+	fillings_4site=[]
+	for U in U_values:
+		physical_params=HamiltonianParams(U,V,1,U/2)
+		system_expectations,cluster_expectations=test_quick_mismatched(lattice_points,cluster_size,physical_params)
+		total_energy,total_filling,total_spin=system_expectations
+		subtracted_energies_4site.append((total_energy+physical_params.mu_0*total_filling)/lattice_points)
+		fillings_4site.append(total_filling/lattice_points)
+	
+	# Add energy trace
+	fig.add_trace(
+		go.Scatter(
+			x=U_values,
+			y=np.array(subtracted_energies_4site),
+			mode='lines+markers',
+			name='Energy Density',
+			line=dict(color='blue', width=2),
+			marker=dict(size=8)
+		),
+		row=1, col=1
+	)
+	
+	# Add filling trace
+	fig.add_trace(
+		go.Scatter(
+			x=U_values,
+			y=np.array(fillings_4site),
+			mode='lines+markers',
+			name='Filling Density',
+			line=dict(color='red', width=2),
+			marker=dict(size=8)
+		),
+		row=1, col=2
+	)
+	
+	# Update layout and axis labels
+	fig.update_layout(
+		title=f'Cluster Method Results vs U (V={V})',
+		showlegend=True
+	)
+	fig.update_xaxes(title_text="U", row=1, col=1)
+	fig.update_yaxes(title_text="Energy Density", row=1, col=1)
+	fig.update_xaxes(title_text="U", row=1, col=2)
+	fig.update_yaxes(title_text="Filling Density", row=1, col=2)
 
+	return fig
 
+def compare_all_methods_vs_U(U_values, V=0, t=1):
+	"""
+	Compare DMRG, two-site, cluster method (from main.py), and four-site cluster method
+	Similar to compare_half_filling_U_fixed_V but with all methods
+	"""
+	from aah_code.main import run_cluster_method, run_dmrg_method, run_twosite
+	
+	fig = make_subplots(
+		rows=1, cols=2,
+		subplot_titles=['Energy Density vs U (Half-Filling)', 'Filling Density vs U (Half-Filling)']
+	)
+	
+	# Storage for results
+	energies_dmrg = []
+	energies_twosite = []
+	energies_cluster_2site = []
+	energies_cluster_4site = []
+	
+	fillings_dmrg = []
+	fillings_twosite = []
+	fillings_cluster_2site = []
+	fillings_cluster_4site = []
+	
+	system_size = 10  # For DMRG and 2-site cluster method
+	lattice_points = 16  # For 4-site cluster method
+	cluster_size = 2
+	chi = 32
+	
+	print(f"Comparing all methods for U values: {U_values}")
+	print(f"V = {V}, t = {t}")
+	
+	for U in U_values:
+		mu_0 = U / 2  # Half-filling condition
+		print(f"\n--- U = {U}, μ₀ = {mu_0} ---")
+		
+		# 1. DMRG method
+		print("Running DMRG...")
+		energy_dmrg, filling_dmrg = run_dmrg_method(U, mu_0, V, t, system_size, chi)
+		energy_dmrg_subtracted = energy_dmrg + (mu_0 * filling_dmrg * system_size)
+		energies_dmrg.append(energy_dmrg_subtracted / system_size)
+		fillings_dmrg.append(filling_dmrg)
+		
+		# 2. Two-site analytical
+		print("Running two-site analytical...")
+		energy_twosite = run_twosite(U, mu_0, V, t, system_size)
+		energies_twosite.append(energy_twosite)
+		fillings_twosite.append(1.0)  # Half-filling by construction
+		
+		# 3. Cluster method (2-site clusters from main.py)
+		print("Running 2-site cluster method...")
+		energy_cluster_2, filling_cluster_2 = run_cluster_method(U, mu_0, V, t, system_size)
+		energy_cluster_2_subtracted = energy_cluster_2 + mu_0 * filling_cluster_2
+		energies_cluster_2site.append(energy_cluster_2_subtracted / system_size)
+		fillings_cluster_2site.append(filling_cluster_2 / system_size)
+		
+		# 4. Four-site cluster method (from quick_spectrum_test_vary_U)
+		print("Running 4-site cluster method...")
+		physical_params = HamiltonianParams(U, V, t, mu_0)
+		system_expectations, cluster_expectations = test_quick_mismatched(lattice_points, cluster_size, physical_params)
+		total_energy, total_filling, total_spin = system_expectations
+		energy_cluster_4_subtracted = (total_energy + physical_params.mu_0 * total_filling) / lattice_points
+		energies_cluster_4site.append(energy_cluster_4_subtracted)
+		fillings_cluster_4site.append(total_filling / lattice_points)
+		
+		print(f"DMRG:              E={energies_dmrg[-1]:.3f}, n={fillings_dmrg[-1]:.3f}")
+		print(f"Two-site:          E={energies_twosite[-1]:.3f}, n={fillings_twosite[-1]:.3f}")
+		print(f"Cluster (2-site):  E={energies_cluster_2site[-1]:.3f}, n={fillings_cluster_2site[-1]:.3f}")
+		print(f"Cluster (4-site):  E={energies_cluster_4site[-1]:.3f}, n={fillings_cluster_4site[-1]:.3f}")
+	
+	# Convert to numpy arrays
+	energies_dmrg = np.array(energies_dmrg)
+	energies_twosite = np.array(energies_twosite)
+	energies_cluster_2site = np.array(energies_cluster_2site)
+	energies_cluster_4site = np.array(energies_cluster_4site)
+	
+	fillings_dmrg = np.array(fillings_dmrg)
+	fillings_twosite = np.array(fillings_twosite)
+	fillings_cluster_2site = np.array(fillings_cluster_2site)
+	fillings_cluster_4site = np.array(fillings_cluster_4site)
+	
+	# Plot energies (left column)
+	fig.add_trace(
+		go.Scatter(
+			x=U_values, y=energies_dmrg,
+			mode='lines+markers',
+			name='DMRG',
+			line=dict(color='red', width=2),
+			marker=dict(size=8)
+		),
+		row=1, col=1
+	)
+	
+	fig.add_trace(
+		go.Scatter(
+			x=U_values, y=energies_twosite,
+			mode='lines+markers',
+			name='Two-site Analytical',
+			line=dict(color='green', width=2),
+			marker=dict(size=8)
+		),
+		row=1, col=1
+	)
+	
+	fig.add_trace(
+		go.Scatter(
+			x=U_values, y=energies_cluster_2site,
+			mode='lines+markers',
+			name='Cluster (2-site)',
+			line=dict(color='blue', width=2),
+			marker=dict(size=8)
+		),
+		row=1, col=1
+	)
+	
+	fig.add_trace(
+		go.Scatter(
+			x=U_values, y=energies_cluster_4site,
+			mode='lines+markers',
+			name='Cluster (4-site)',
+			line=dict(color='purple', width=2),
+			marker=dict(size=8)
+		),
+		row=1, col=1
+	)
+	
+	# Plot fillings (right column)
+	fig.add_trace(
+		go.Scatter(
+			x=U_values, y=fillings_dmrg,
+			mode='lines+markers',
+			name='DMRG',
+			line=dict(color='red', width=2),
+			marker=dict(size=8),
+			showlegend=False
+		),
+		row=1, col=2
+	)
+	
+	fig.add_trace(
+		go.Scatter(
+			x=U_values, y=fillings_twosite,
+			mode='lines+markers',
+			name='Two-site Analytical',
+			line=dict(color='green', width=2),
+			marker=dict(size=8),
+			showlegend=False
+		),
+		row=1, col=2
+	)
+	
+	fig.add_trace(
+		go.Scatter(
+			x=U_values, y=fillings_cluster_2site,
+			mode='lines+markers',
+			name='Cluster (2-site)',
+			line=dict(color='blue', width=2),
+			marker=dict(size=8),
+			showlegend=False
+		),
+		row=1, col=2
+	)
+	
+	fig.add_trace(
+		go.Scatter(
+			x=U_values, y=fillings_cluster_4site,
+			mode='lines+markers',
+			name='Cluster (4-site)',
+			line=dict(color='purple', width=2),
+			marker=dict(size=8),
+			showlegend=False
+		),
+		row=1, col=2
+	)
+	
+	# Update layout
+	fig.update_layout(
+		title=f'Method Comparison: DMRG vs Analytical vs Cluster Methods (V={V})',
+		showlegend=True,
+		height=500
+	)
+	
+	# Update axes
+	fig.update_xaxes(title_text="U", row=1, col=1)
+	fig.update_yaxes(title_text="Energy Density", row=1, col=1)
+	fig.update_xaxes(title_text="U", row=1, col=2)
+	fig.update_yaxes(title_text="Filling Density", row=1, col=2)
+	
 	return fig
 
 if __name__ == "__main__":
@@ -642,9 +884,17 @@ if __name__ == "__main__":
 	
 	#exit('Inspected Hamiltonian - check that coupling is correct')
 	
-	lattice_points=16
-	cluster_size=2
-	test_quick_mismatched(lattice_points,cluster_size)
+	#lattice_points=16
+	#cluster_size=2
+	#test_quick_mismatched(lattice_points,cluster_size)
+	U_values=np.linspace(3,10,7)
+	#fig=quick_spectrum_test_vary_U(U_values,V=0)
+	#fig.show()
+
+	compare_all_methods_vs_U(U_values,V=5,t=1).show()
+	#fig.write_html("quick_spectrum_test.html")
+	#print("Quick spectrum test saved as 'quick_spectrum_test.html'")
+
 	
 	exit('testing 4 site')
 
