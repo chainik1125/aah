@@ -40,16 +40,17 @@ class Hubbard1D(CouplingMPOModel, NearestNeighborModel):
 
 	# Set 1D lattice
 	def init_lattice(self, model_params):
-		if 'basis_class' in model_params:
-			lat=model_params['basis_class'].init_cluster_lattice()
+		# if 'basis_class' in model_params:
+		# 	lat=model_params['basis_class'].init_cluster_lattice()
+		if False:
+			pass
 		else:
-			
 			L = model_params['L'] # size
 			bc = 'periodic'  # always use 'open'
 			bc_MPS = 'finite'  # 'infinite' does iDMRG (still use open in 'bc')
 			lat = lattice.Chain(L=L, bc=bc, bc_MPS=bc_MPS, site=self.init_sites(model_params))
-
-			raise Warning("No basis class provided - using default chain with period chain bc and finite MPS ")
+			#return lat
+			#raise Warning("No basis class provided - using default chain with period chain bc and finite MPS ")
 		
 		return lat
 
@@ -123,6 +124,117 @@ class Hubbard1D(CouplingMPOModel, NearestNeighborModel):
 
 		else:
 			raise ValueError("No basis class provided")
+		
+class QuickHubbard1D(CouplingMPOModel, NearestNeighborModel):
+	"""
+	Input is a dictionary called model_params that includes:
+		'L' (length), 'bc' ('open' or 'periodic'), 'bc_MPS' ('finite' or 'infinite'),
+		't' (hopping strength), 'U' (Hubbard interaction strength), 'filling' (1 is half-filling)
+	"""
+
+	# Initialize spin-1/2 fermion d.o.f. on each site
+	def init_sites(self, model_params):
+		# Remove both particle number and spin conservation to allow DMRG to explore all sectors
+		if 'basis_classes' in model_params:
+			site=model_params['basis_classes'][0].init_sites()
+		else:
+			site = tp.networks.site.SpinHalfFermionSite(cons_N=None, cons_Sz=None)
+			raise Warning("No basis class provided - using default spin-1/2 fermion site")
+			
+		return site
+
+	# Set 1D lattice
+	def init_lattice(self, model_params):
+		if 'basis_classes' in model_params:
+			lat=model_params['basis_classes'][0].init_cluster_lattice()
+			# Keep periodic boundary conditions for V coupling
+			lat.bc = [True]
+		else:
+			
+			L = model_params['L'] # size
+			bc = 'periodic'  # always use 'open'
+			bc_MPS = 'finite'  # 'infinite' does iDMRG (still use open in 'bc')
+			lat = lattice.Chain(L=L, bc=bc, bc_MPS=bc_MPS, site=self.init_sites(model_params))
+
+			raise Warning("No basis class provided - using default chain with period chain bc and finite MPS ")
+		
+		return lat
+
+	def init_terms(self, model_params):
+		
+		# default is U=1, t=1
+		U = model_params.get('U', 0.0)
+		t = model_params.get('t', 0.0)
+		mu_0 = model_params.get('mu', 0.0)
+		V=model_params.get('V', 0.0)
+		L_cells = model_params.get('L',4)
+		L_int_cluster=model_params['L_cluster']
+		# nearest neighbor hopping -t
+		if 'basis_classes' in model_params:
+			for bc_index,basis_class in enumerate(model_params['basis_classes']):
+				basis_object=model_params['basis_classes'][bc_index]
+				mu_tilde=mu_tilde_coefficient(t,basis_object,dispersion=cosine_dispersion)
+				
+				# Calculate the site range for this subcluster
+				cluster_size = len(basis_object.cluster_k_points)
+				L_start = bc_index * cluster_size
+				L_end = L_start + cluster_size
+
+				#Add the mu_tilde term and the mu_0 term only to sites in this subcluster
+				mu_eff=mu_0-mu_tilde
+
+				for alpha in range(len(self.lat.unit_cell)):
+					for site_idx in range(L_start, L_end):
+						self.add_onsite(-mu_eff, alpha, 'Nu', site_idx)  # chemical potential n_up
+						self.add_onsite(-mu_eff, alpha, 'Nd', site_idx)  # chemical potential n_down
+			
+				#Add the t_tilde term
+
+				number_cell_positions=len(self.lat.unit_cell_positions)
+				if number_cell_positions>1:
+					raise ValueError("I haven't implemented the t_tilde term for more than one unit cell position")
+				else:
+					# n_alpha_sites=len(self.lat.unit_cell)
+					# for alpha in range(n_alpha_sites):
+					# 	for beta in range(alpha+1,n_alpha_sites):
+					# 		dx=(alpha)-(beta)
+					# 		t_tilde=(1/n_alpha_sites)*np.array([2*t*np.cos(dx*2*np.pi*j/n_alpha_sites) for j in range(n_alpha_sites)]).sum()
+					# 		self.add_coupling(t_tilde, alpha, 'Cdd', beta, 'Cd', dx, plus_hc=True)  # Cdagger_down C_down + h.c.
+					# 		self.add_coupling(t_tilde, alpha, 'Cdu', beta, 'Cu', dx, plus_hc=True)  # Cdagger_up C_up + h.c.
+
+							# number of unit cells in the 1-D chain:contentReference[oaicite:6]{index=6}
+					# Only add t_tilde couplings within this subcluster
+					for dx in range(1, cluster_size//2+1):      # 1 … cluster_size-1   (dx = 0 already handled)
+						for alpha in range(len(self.lat.unit_cell)):
+							cluster_k_points=basis_object.cluster_k_points
+							#There are two factor of 1/2:
+							#1. Comes from the 1/2 in the t_tilde definition
+							#2. Comes from double counting when including the hc - if you get confused about
+							# this again remember the two site model hopping eigenenergies are not \pm 2t but \pm t !
+							t_tilde=(1/2)*(1/cluster_size)*np.array([2*t*np.cos(cluster_k_points[j])*(1/2)*2*t*np.cos(dx*2*np.pi*j/cluster_size) for j in range(cluster_size)]).sum()
+							
+							self.add_coupling(t_tilde, alpha, 'Cdd', alpha, 'Cd', dx, plus_hc=True)
+							self.add_coupling(t_tilde, alpha, 'Cdu', alpha, 'Cu', dx, plus_hc=True)
+				
+				
+				
+				
+				#Add the onsite alpha U only to sites in this subcluster
+				for alpha in range(len(self.lat.unit_cell)):
+					for site_idx in range(L_start, L_end):
+						self.add_onsite(U, alpha, 'NuNd', site_idx)  # Hubbard n_up n_down term
+					
+			#Add V as next-nearest neighbor coupling (site 0<->2, site 1<->3)
+			if abs(V) > 0:
+				# Use dx=2 for next-nearest neighbor with periodic BC
+				for alpha in range(len(self.lat.unit_cell)):
+					#NOTE! I think it's V/4 here because I added it as a NNN hopping term
+					#with hermitian conjugates in each so I double count.
+					self.add_coupling(V/4, alpha, 'Cdd', alpha, 'Cd', 2, plus_hc=True)
+					self.add_coupling(V/4, alpha, 'Cdu', alpha, 'Cu', 2, plus_hc=True)
+
+		else:
+			raise ValueError("No basis class provided")
 
 class SpectrumSolver():
 	"""
@@ -181,6 +293,8 @@ class FullSpectrum():
 	"""
 	def __init__(self,clustered_k_points:np.ndarray,state_params:StatesParams,physical_params:HamiltonianParams,temperature:Union[None,float]=None):
 		self.clustered_k_points=clustered_k_points
+		self.state_params=state_params
+		self.physical_params=physical_params
 		self.temperature=temperature
 
 		
@@ -191,12 +305,12 @@ class FullSpectrum():
 		number_spectrum=[]
 		spin_spectrum=[]
 		for cluster_k in self.clustered_k_points:		
-			cluster_object=LocalClusterBasis(cluster_k,state_params)
+			cluster_object=LocalClusterBasis(cluster_k,self.state_params)
 			hamiltonian_object=Hubbard1D({'basis_class':cluster_object,
-											'V':physical_params.V,
-											't':physical_params.hopping,
-											'mu':physical_params.mu_0,
-											'U':physical_params.U,
+											'V':self.physical_params.V,
+											't':self.physical_params.hopping,
+											'mu':self.physical_params.mu_0,
+											'U':self.physical_params.U,
 											})
 			
 			
@@ -263,9 +377,83 @@ class FullSpectrum():
 
 
 				
+class MismatchedQuick():
+	def __init__(self,cluster_experiment:ClusterExperiment,physical_params,V_k_period:int=2):
+		self.cluster_experiment=cluster_experiment
+		self.V_k_period=V_k_period
+		self.physical_params=physical_params
+	
+	def recluster(self):
+		int_cluster_ks_idxs=self.cluster_experiment.generate_clusters(return_indices=True)
+		lattice_points=self.cluster_experiment.lattice_points
+		logger.info(f'int cluster K shape: {int_cluster_ks_idxs.shape}')
+		v_k_step=2*np.pi*(self.V_k_period/lattice_points)
 
+		accounted_k_clusters=set()
+		new_k_clusters_idxs=[]
+		for i in range(len(int_cluster_ks_idxs)):
+			cluster_k_idxs=int_cluster_ks_idxs[i]
+			# Apply modular arithmetic to handle periodic boundary conditions
+			stepped_k_idxs=(cluster_k_idxs+self.V_k_period) % lattice_points
+			
+			# Convert arrays to tuples for set membership checking
+			cluster_tuple = tuple(cluster_k_idxs.flatten())
+			stepped_tuple = tuple(stepped_k_idxs.flatten())
+			
+			if cluster_tuple in accounted_k_clusters:
+				continue
+			else:
+				# Stack the two size-2 clusters to maintain cluster index dimension
+				paired_clusters = np.stack([cluster_k_idxs, stepped_k_idxs], axis=0)
+				new_k_clusters_idxs.append(paired_clusters)
+				accounted_k_clusters.add(stepped_tuple)
+				accounted_k_clusters.add(cluster_tuple)
+		
+		if len(new_k_clusters_idxs) > 0:
+			new_k_clusters_idxs=np.stack(new_k_clusters_idxs,axis=0)
+			
+			# Convert indices back to actual k-point values
+			k_spacing = 2*np.pi/lattice_points
+			new_k_clusters = new_k_clusters_idxs * k_spacing
+			
+			logger.info(f'shape new_k_clusters:{new_k_clusters.shape}')
+			return new_k_clusters,new_k_clusters_idxs
+		else:
+			logger.info('No new k-clusters found')
+			return np.array([])
 
 	
+
+
+def test_quick_mismatched(lattice_points,cluster_size):
+	#lattice_points=16
+	#cluster_size=2
+	physical_params=HamiltonianParams(U=10,V=1,hopping=1,mu_0=10/2)
+	state_params=StatesParams(spin_states=2)
+	int_lattice_object=ClusterExperiment(cluster_size,lattice_points,lattice_points//2)
+	print(type(int_lattice_object))
+	test=MismatchedQuick(int_lattice_object,physical_params,lattice_points//4)
+	cluster_ks,cluster_idxs=test.recluster()
+	print(f'cluster ks shape: {cluster_idxs.shape}')
+	print(f'cluster idxs: {cluster_idxs}')
+
+	#Lets try to make the hamiltonian
+	for cluster_k in cluster_ks:
+		total_cluster_size=cluster_k.shape[0]*cluster_k.shape[1]
+		test_basis_1=LocalClusterBasis(cluster_k[0],state_params)
+		test_basis_2=LocalClusterBasis(cluster_k[1],state_params)
+		test_ham=QuickHubbard1D({'basis_classes':[test_basis_1,test_basis_2],
+					'L':total_cluster_size,
+					'L_cluster':total_cluster_size,
+					'V':physical_params.V,
+					't':physical_params.hopping,
+					'U':physical_params.U,
+					'mu':10*physical_params.U,
+					})
+		
+		print(f'test ham type: {type(test_ham)}')
+
+		break
 	
 		
 	
@@ -291,9 +479,16 @@ if __name__ == "__main__":
 				'mu':10*physical_params.U,
 				}
 	
-	test_ham=Hubbard1D(ham_dict)
+	#test_ham=Hubbard1D(ham_dict)
 
 	#print(vars(test_ham.all_coupling_terms()))
+
+	#test the mismatched spectrum code
+	lattice_points=16
+	cluster_size=2
+	test_quick_mismatched(lattice_points,cluster_size)
+
+	exit('testing mismatched hamitlonian ')
 
 	#test the full spectrum code
 	lattice_points=10
