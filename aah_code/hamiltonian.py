@@ -125,7 +125,7 @@ class Hubbard1D(CouplingMPOModel, NearestNeighborModel):
 		else:
 			raise ValueError("No basis class provided")
 		
-class QuickHubbard1D(CouplingMPOModel, NearestNeighborModel):
+class QuickHubbard1D(CouplingMPOModel):
 	"""
 	Input is a dictionary called model_params that includes:
 		'L' (length), 'bc' ('open' or 'periodic'), 'bc_MPS' ('finite' or 'infinite'),
@@ -146,7 +146,11 @@ class QuickHubbard1D(CouplingMPOModel, NearestNeighborModel):
 	# Set 1D lattice
 	def init_lattice(self, model_params):
 		if 'basis_classes' in model_params:
-			lat=model_params['basis_classes'][0].init_cluster_lattice()
+			# Use the total system size L instead of just the first basis class
+			L = model_params['L'] # total system size
+			bc = 'periodic'  # periodic boundary conditions
+			bc_MPS = 'finite'  # finite MPS
+			lat = lattice.Chain(L=L, bc=bc, bc_MPS=bc_MPS, site=self.init_sites(model_params))
 			# Keep periodic boundary conditions for V coupling
 			lat.bc = [True]
 		else:
@@ -183,6 +187,9 @@ class QuickHubbard1D(CouplingMPOModel, NearestNeighborModel):
 				#Add the mu_tilde term and the mu_0 term only to sites in this subcluster
 				mu_eff=mu_0-mu_tilde
 
+				
+				
+
 				for alpha in range(len(self.lat.unit_cell)):
 					for site_idx in range(L_start, L_end):
 						self.add_onsite(-mu_eff, alpha, 'Nu', site_idx)  # chemical potential n_up
@@ -204,17 +211,16 @@ class QuickHubbard1D(CouplingMPOModel, NearestNeighborModel):
 
 							# number of unit cells in the 1-D chain:contentReference[oaicite:6]{index=6}
 					# Only add t_tilde couplings within this subcluster
-					for dx in range(1, cluster_size//2+1):      # 1 … cluster_size-1   (dx = 0 already handled)
-						for alpha in range(len(self.lat.unit_cell)):
-							cluster_k_points=basis_object.cluster_k_points
-							#There are two factor of 1/2:
-							#1. Comes from the 1/2 in the t_tilde definition
-							#2. Comes from double counting when including the hc - if you get confused about
-							# this again remember the two site model hopping eigenenergies are not \pm 2t but \pm t !
-							t_tilde=(1/2)*(1/cluster_size)*np.array([2*t*np.cos(cluster_k_points[j])*(1/2)*2*t*np.cos(dx*2*np.pi*j/cluster_size) for j in range(cluster_size)]).sum()
-							
-							self.add_coupling(t_tilde, alpha, 'Cdd', alpha, 'Cd', dx, plus_hc=True)
-							self.add_coupling(t_tilde, alpha, 'Cdu', alpha, 'Cu', dx, plus_hc=True)
+					# For 2-site clusters, only add nearest neighbor hopping within the cluster
+					if cluster_size == 2:  # Only nearest neighbor within 2-site clusters
+						cluster_k_points=basis_object.cluster_k_points
+						# Calculate t_tilde for dx=1 within this cluster
+						t_tilde=(1/2)*(1/cluster_size)*np.array([2*t*np.cos(cluster_k_points[j])*(1/2)*2*t*np.cos(1*2*np.pi*j/cluster_size) for j in range(cluster_size)]).sum()
+						
+						# Add hopping between the two sites in this cluster: L_start <--> L_start+1
+						i1, i2 = L_start, L_start + 1
+						self.add_coupling_term(t_tilde, i1, i2, 'Cdd', 'Cd', plus_hc=True)
+						self.add_coupling_term(t_tilde, i1, i2, 'Cdu', 'Cu', plus_hc=True)
 				
 				
 				
@@ -255,12 +261,15 @@ class SpectrumSolver():
 			
 			ed = exact_diag.ExactDiag(self.hamiltonian)                 # solver instance  :contentReference[oaicite:0]{index=0}
 			
-			ed.build_full_H_from_bonds() 
+			# Use MPO-based exact diagonalization to handle next-nearest neighbor couplings
+			ed.build_full_H_from_mpo()
 			ed.full_diagonalization()                    # fills ed.full_H  :contentReference[oaicite:1]{index=1}
 			E = ed.E
 			V = ed.V
 			#E0, psi_vec = ed.groundstate()
 			#
+			
+			
 			eigvals=[]
 			eigvecs=[]
 			n_ups=[]
@@ -277,6 +286,7 @@ class SpectrumSolver():
 			n_ups=np.stack(n_ups,axis=0)
 			n_downs=np.stack(n_downs,axis=0)
 			n_tot=n_ups+n_downs
+			
 			return eigvals,eigvecs,n_ups,n_downs,n_tot
 			#TODO:add functionality to efficiently get smaller number of total states.
 
@@ -353,7 +363,11 @@ class FullSpectrum():
 				cluster_energy_expectations.append(energy_spectrum[cluster_energy_argmin])
 				cluster_number_expectations.append(number_spectrum[cluster_energy_argmin])
 				spin_multiplier=np.array([1,-1])#to give +1 to up spins and -1 to down spins.
-				cluster_spin_expectations.append(np.sum(spin_spectrum[cluster_energy_argmin]*spin_multiplier))
+				# spin_spectrum[i] has shape (2, 256, 4): (spins, eigenstates, sites)
+				# We need to extract the ground state and sum over sites for each spin type
+				ground_state_spins = spin_spectrum[:, cluster_energy_argmin, :]  # shape (2, 4)
+				spin_polarization = np.sum(ground_state_spins * spin_multiplier[:, np.newaxis], axis=(0,1))  # sum over spins and sites
+				cluster_spin_expectations.append(spin_polarization)
 			else:
 				logger.info(f'Temperature is {temperature} - returning temperature dependent expectations')
 				beta=1/temperature
@@ -363,7 +377,12 @@ class FullSpectrum():
 				cluster_energy_expectations.append(np.sum(energy_spectrum*np.exp(-beta*energy_spectrum))/sum_partition_function)
 				cluster_number_expectations.append(np.sum(number_spectrum*np.exp(-beta*energy_spectrum))/sum_partition_function)
 				spin_multiplier=np.array([1,-1])#to give +1 to up spins and -1 to down spins.
-				cluster_spin_expectations.append(np.sum(spin_spectrum*spin_multiplier*np.exp(-energy_spectrum/temperature))/sum_partition_function)
+				# Handle temperature-dependent case with proper broadcasting
+				boltzmann_weights = np.exp(-beta*energy_spectrum)  # shape (256,)
+				# spin_spectrum has shape (2, 256, 4), multiply by weights and sum
+				weighted_spins = np.sum(spin_spectrum * boltzmann_weights[np.newaxis, :, np.newaxis], axis=1)  # sum over eigenstates, shape (2, 4)
+				spin_polarization = np.sum(weighted_spins * spin_multiplier[:, np.newaxis], axis=(0,1))  # sum over spins and sites
+				cluster_spin_expectations.append(spin_polarization / sum_partition_function)
 		
 		system_energy=np.sum(cluster_energy_expectations)
 		system_number=np.sum(cluster_number_expectations)
@@ -422,8 +441,118 @@ class MismatchedQuick():
 			logger.info('No new k-clusters found')
 			return np.array([])
 
+def get_spectra(cluster_ks, state_params, physical_params):
+	#Lets try to make the hamiltonian
+
+	k_points=[]
+	energy_spectrum=[]
+	number_spectrum=[]
+	spin_spectrum=[]
+
+	for cluster_k in cluster_ks:
+		total_cluster_size=cluster_k.shape[0]*cluster_k.shape[1]
+		test_basis_1=LocalClusterBasis(cluster_k[0],state_params)
+		test_basis_2=LocalClusterBasis(cluster_k[1],state_params)
+		test_ham=QuickHubbard1D({'basis_classes':[test_basis_1,test_basis_2],
+					'L':total_cluster_size,
+					'L_cluster':cluster_k.shape[0],
+					'V':physical_params.V,
+					't':physical_params.hopping,
+					'U':physical_params.U,
+					'mu':physical_params.mu_0,
+					})
+		
+		solver=SpectrumSolver(test_ham,None)#basis object never explicitly used anyway
+		eigvals,eigvecs,n_ups,n_downs,n_tot=solver.solve_spectrum()
+
+
+		k_points.append(cluster_k)
+		energy_spectrum.append(eigvals)
+		number_spectrum.append(n_tot)
+		spin_spectrum.append(np.array([n_ups,n_downs]))
+
+			
+		
+	k_points=np.stack(k_points,axis=0)
+	energy_spectrum=np.stack(energy_spectrum,axis=0)
+	number_spectrum=np.stack(number_spectrum,axis=0)
+	spin_spectrum=np.stack(spin_spectrum,axis=0)
+
+	logger.info(f'spin spectrum shape: {spin_spectrum.shape}')
+		
+
+	return k_points,energy_spectrum,number_spectrum,spin_spectrum
+
+
+
+		
+
+		
+
+		
+
+	return None
+
 	
 
+
+def inspect_hamiltonian_terms(hamiltonian):
+	"""
+	Inspect and tabulate all terms in a TenPy Hamiltonian
+	"""
+	print("="*80)
+	print("HAMILTONIAN TERMS INSPECTION")
+	print("="*80)
+	
+	# Method 1: Summary table with actual term values
+	print("\n1. SUMMARY TABLE:")
+	print("-" * 80)
+	print("| Term Type | Site(s) | Operator(s) | Strength | dx | Description |")
+	print("|-----------|---------|-------------|----------|--------|-------------|")
+	
+	# Onsite terms - need to extract from the OnsiteTerms objects
+	if hasattr(hamiltonian, 'onsite_terms') and hamiltonian.onsite_terms:
+		for site_idx, onsite_term in hamiltonian.onsite_terms.items():
+			# Try to access the terms dictionary directly
+			if hasattr(onsite_term, '_terms'):
+				for op_name, strength in onsite_term._terms.items():
+					description = f"Site {site_idx}"
+					print(f"| Onsite    | {site_idx:7} | {op_name:11} | {strength:8.3f} | N/A    | {description:11} |")
+	
+	# Coupling terms - need to extract from CouplingTerms objects
+	if hasattr(hamiltonian, 'coupling_terms') and hamiltonian.coupling_terms:
+		for term_name, coupling_term in hamiltonian.coupling_terms.items():
+			if hasattr(coupling_term, '_terms'):
+				for term_key, strength in coupling_term._terms.items():
+					# term_key format: ((u1, u2), (i1, i2), dx)
+					u_pair = term_key[0] if len(term_key) > 0 else (0,0)
+					site_pair = term_key[1] if len(term_key) > 1 else (0,0)
+					dx = term_key[2] if len(term_key) > 2 else 0
+					sites = f"{site_pair}"
+					description = f"dx={dx}, u={u_pair}"
+					print(f"| Coupling  | {sites:7} | {term_name:11} | {strength:8.3f} | {dx:6} | {description:11} |")
+	
+	# Method 2: Alternative inspection using dir() 
+	print("\n2. DETAILED TERM INSPECTION:")
+	print("-" * 50)
+	
+	# Try to access terms via different attributes
+	for attr in ['onsite_terms', 'coupling_terms']:
+		if hasattr(hamiltonian, attr):
+			terms_dict = getattr(hamiltonian, attr)
+			print(f"\n{attr}:")
+			for key, term_obj in terms_dict.items():
+				print(f"  {key}: {type(term_obj)}")
+				# Try to find the actual terms
+				for attr_name in dir(term_obj):
+					if 'term' in attr_name.lower() and not attr_name.startswith('_'):
+						try:
+							value = getattr(term_obj, attr_name)
+							print(f"    .{attr_name}: {value}")
+						except:
+							pass
+	
+	print("\n" + "="*80)
 
 def test_quick_mismatched(lattice_points,cluster_size):
 	#lattice_points=16
@@ -437,58 +566,73 @@ def test_quick_mismatched(lattice_points,cluster_size):
 	print(f'cluster ks shape: {cluster_idxs.shape}')
 	print(f'cluster idxs: {cluster_idxs}')
 
-	#Lets try to make the hamiltonian
-	for cluster_k in cluster_ks:
-		total_cluster_size=cluster_k.shape[0]*cluster_k.shape[1]
-		test_basis_1=LocalClusterBasis(cluster_k[0],state_params)
-		test_basis_2=LocalClusterBasis(cluster_k[1],state_params)
-		test_ham=QuickHubbard1D({'basis_classes':[test_basis_1,test_basis_2],
-					'L':total_cluster_size,
-					'L_cluster':total_cluster_size,
-					'V':physical_params.V,
-					't':physical_params.hopping,
-					'U':physical_params.U,
-					'mu':10*physical_params.U,
-					})
-		
-		print(f'test ham type: {type(test_ham)}')
+	#k_points,energies,number_spectrum,spin_spectrum=get_spectra(cluster_ks)
+	spectra_4tuple=get_spectra(cluster_ks, state_params, physical_params)
+	
+	print(f'k points shape: {spectra_4tuple[0].shape},\n energies shape: {spectra_4tuple[1].shape},\n number_spectrum shape: {spectra_4tuple[2].shape}, spin spectrum shape: {spectra_4tuple[3].shape}')
 
-		break
+	full_spectrum_obj=FullSpectrum(None,state_params,physical_params,None)
+	system_expectations,cluster_expectations=full_spectrum_obj.get_cluster_thermodynamic_expectations(spectra_4tuple,None)
+
+	print(f"system energy density: {system_expectations[0]/lattice_points}",
+	   	f"system energy density mu_subtracted: {(system_expectations[0]+system_expectations[1]*physical_params.mu_0)/lattice_points} "
+	   	f"system filling density: {system_expectations[1]/lattice_points}",
+		f"system spin density:{system_expectations[2]/lattice_points}")
+
+
 	
 		
 	
+
+def test_hamiltonian_inspection():
+	"""
+	Test function to inspect a single QuickHubbard1D Hamiltonian
+	"""
+	print("Creating test QuickHubbard1D Hamiltonian...")
+	
+	# Create test parameters
+	state_params = StatesParams(spin_states=2)
+	physical_params = HamiltonianParams(U=2.0, V=0.5, hopping=1.0, mu_0=1.0)
+	
+	# Create two test clusters with different k-points
+	cluster_k_1 = np.array([0.0, np.pi])  # k-points for cluster 1
+	cluster_k_2 = np.array([np.pi/2, 3*np.pi/2])  # k-points for cluster 2
+	
+	test_basis_1 = LocalClusterBasis(cluster_k_1, state_params)
+	test_basis_2 = LocalClusterBasis(cluster_k_2, state_params)
+	
+	# Create QuickHubbard1D with these clusters
+	test_ham = QuickHubbard1D({
+		'basis_classes': [test_basis_1, test_basis_2],
+		'L': 4,  # 2 sites per cluster × 2 clusters
+		'L_cluster': 2,
+		'V': physical_params.V,
+		't': physical_params.hopping,
+		'U': physical_params.U,
+		'mu': physical_params.mu_0,
+	})
+	
+	print(f"Hamiltonian created with lattice size: {test_ham.lat.Ls}")
+	print(f"Physical params: U={physical_params.U}, V={physical_params.V}, t={physical_params.hopping}, mu={physical_params.mu_0}")
+	
+	# Inspect the Hamiltonian terms
+	inspect_hamiltonian_terms(test_ham)
+	
+	return test_ham
 
 if __name__ == "__main__":
 	print('main')
 
-	state_params=StatesParams(spin_states=2)
-	physical_params=HamiltonianParams(U=10,V=2,hopping=1.0,mu_0=10/2)
-	cluster_k_points=np.array([[-np.pi],
-								[0]])
-
-	print(f'cluster_k_points shape:{cluster_k_points.shape}')
-
-	test_basis=LocalClusterBasis(cluster_k_points,state_params)
-
-	local_lattice=test_basis.init_cluster_lattice()
-	#model = Hubbard1D({'L': 2, 'U':physical_params.U, 't':physical_params.hopping, 'bc':'open', 'bc_MPS':'finite', 'mu':physical_params.mu})
-	ham_dict={'basis_class':test_basis,
-		   		'V':physical_params.V,
-				't':physical_params.hopping,
-				'U':physical_params.U,
-				'mu':10*physical_params.U,
-				}
+	# Test Hamiltonian inspection
+	#test_hamiltonian_inspection()
 	
-	#test_ham=Hubbard1D(ham_dict)
-
-	#print(vars(test_ham.all_coupling_terms()))
-
-	#test the mismatched spectrum code
+	#exit('Inspected Hamiltonian - check that coupling is correct')
+	
 	lattice_points=16
 	cluster_size=2
 	test_quick_mismatched(lattice_points,cluster_size)
-
-	exit('testing mismatched hamitlonian ')
+	
+	exit('testing 4 site')
 
 	#test the full spectrum code
 	lattice_points=10
