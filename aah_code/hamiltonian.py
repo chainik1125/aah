@@ -16,6 +16,9 @@ from tenpy.algorithms import exact_diag
 import numpy as np
 import matplotlib.pyplot as plt
 from typing import Union
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
 
 logger=logging.getLogger(__name__)
 
@@ -501,10 +504,10 @@ def get_spectra(cluster_ks, state_params, physical_params):
 
 
 
-def test_quick_mismatched(lattice_points,cluster_size):
+def test_quick_mismatched(lattice_points,cluster_size,physical_params):
 	#lattice_points=16
 	#cluster_size=2
-	physical_params=HamiltonianParams(U=1,V=0,hopping=1,mu_0=5)
+	#physical_params=HamiltonianParams(U=10,V=5,hopping=1,mu_0=10/2)
 	state_params=StatesParams(spin_states=2)
 	int_lattice_object=ClusterExperiment(cluster_size,lattice_points,lattice_points//4)
 	print(type(int_lattice_object))
@@ -623,6 +626,13 @@ def test_hamiltonian_inspection():
 	inspect_hamiltonian_terms(test_ham)
 	
 	return test_ham
+
+
+def quick_spectrum_test_vary_U(U_values,V):
+	fig=make_subplots(rows=1,cols=2)
+
+
+	return fig
 
 if __name__ == "__main__":
 	print('main')
