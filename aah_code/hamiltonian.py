@@ -187,11 +187,16 @@ class QuickHubbard1D(CouplingMPOModel):
 				#Add the mu_tilde term and the mu_0 term only to sites in this subcluster
 				mu_eff=mu_0-mu_tilde
 
-				# Add chemical potential only to sites in this specific cluster
-				# NOTE: Divide by 4 to compensate for TenPy counting onsite terms 4 times
-				for site_idx in range(L_start, L_end):
-					self.add_onsite(-mu_eff/4, 0, 'Nu', site_idx)  # chemical potential n_up
-					self.add_onsite(-mu_eff/4, 0, 'Nd', site_idx)  # chemical potential n_down
+				
+				
+
+				for alpha in range(len(self.lat.unit_cell)):
+					for site_idx in range(L_start, L_end):
+						#self.add_onsite(-mu_eff/4, alpha, 'Nu', site_idx)  # chemical potential n_up
+						#self.add_onsite(-mu_eff/4, alpha, 'Nd', site_idx)  # chemical potential n_down
+
+						self.add_onsite_term(-mu_eff, site_idx, 'Nu')
+						self.add_onsite_term(-mu_eff, site_idx, 'Nd')
 			
 				#Add the t_tilde term
 
@@ -223,13 +228,10 @@ class QuickHubbard1D(CouplingMPOModel):
 				
 				
 				
-				#Add the onsite U only to sites in this subcluster
-				# NOTE: Divide by 4 to compensate for TenPy counting onsite terms 4 times
-				# for site_idx in range(L_start, L_end):
-				# 	self.add_onsite(U/4, 0, 'NuNd', site_idx)  # Hubbard n_up n_down term
-			#Add the onsite alpha U
-			for alpha in range(len(self.lat.unit_cell)):
-				self.add_onsite(U, alpha, 'NuNd')  # Hubbard n_up n_down term
+				#Add the onsite alpha U only to sites in this subcluster
+				for alpha in range(len(self.lat.unit_cell)):
+					for site_idx in range(L_start, L_end):
+						self.add_onsite(U, alpha, 'NuNd', site_idx)  # Hubbard n_up n_down term
 					
 			#Add V as next-nearest neighbor coupling (site 0<->2, site 1<->3)
 			if abs(V) > 0:
@@ -497,6 +499,37 @@ def get_spectra(cluster_ks, state_params, physical_params):
 	
 
 
+
+
+def test_quick_mismatched(lattice_points,cluster_size):
+	#lattice_points=16
+	#cluster_size=2
+	physical_params=HamiltonianParams(U=1,V=0,hopping=1,mu_0=5)
+	state_params=StatesParams(spin_states=2)
+	int_lattice_object=ClusterExperiment(cluster_size,lattice_points,lattice_points//4)
+	print(type(int_lattice_object))
+	test=MismatchedQuick(int_lattice_object,physical_params,lattice_points//2)
+	cluster_ks,cluster_idxs=test.recluster()
+	print(f'cluster ks shape: {cluster_idxs.shape}')
+	print(f'cluster idxs: {cluster_idxs}')
+
+	#k_points,energies,number_spectrum,spin_spectrum=get_spectra(cluster_ks)
+	spectra_4tuple=get_spectra(cluster_ks, state_params, physical_params)
+	
+	print(f'k points shape: {spectra_4tuple[0].shape},\n energies shape: {spectra_4tuple[1].shape},\n number_spectrum shape: {spectra_4tuple[2].shape}, spin spectrum shape: {spectra_4tuple[3].shape}')
+
+	full_spectrum_obj=FullSpectrum(None,state_params,physical_params,None)
+	system_expectations,cluster_expectations=full_spectrum_obj.get_cluster_thermodynamic_expectations(spectra_4tuple,None)
+
+	print(f"system energy density: {system_expectations[0]/lattice_points}",
+	   	f"system energy density mu_subtracted: {(system_expectations[0]+system_expectations[1]*physical_params.mu_0)/lattice_points} "
+	   	f"system filling density: {system_expectations[1]/lattice_points}",
+		f"system spin density:{system_expectations[2]/lattice_points}")
+
+
+	
+		
+	
 def inspect_hamiltonian_terms(hamiltonian):
 	"""
 	Inspect and tabulate all terms in a TenPy Hamiltonian
@@ -555,37 +588,6 @@ def inspect_hamiltonian_terms(hamiltonian):
 	
 	print("\n" + "="*80)
 
-def test_quick_mismatched(lattice_points,cluster_size):
-	#lattice_points=16
-	#cluster_size=2
-	physical_params=HamiltonianParams(U=20,V=0,hopping=1,mu_0=20/2)
-	state_params=StatesParams(spin_states=2)
-	int_lattice_object=ClusterExperiment(cluster_size,lattice_points,lattice_points//2)
-	print(type(int_lattice_object))
-	test=MismatchedQuick(int_lattice_object,physical_params,lattice_points//4)
-	cluster_ks,cluster_idxs=test.recluster()
-	print(f'cluster ks shape: {cluster_idxs.shape}')
-	print(f'cluster idxs: {cluster_idxs}')
-
-	#k_points,energies,number_spectrum,spin_spectrum=get_spectra(cluster_ks)
-	spectra_4tuple=get_spectra(cluster_ks, state_params, physical_params)
-	
-	# print(f'k points shape: {spectra_4tuple[0].shape},\n energies shape: {spectra_4tuple[1].shape},\n number_spectrum shape: {spectra_4tuple[2].shape}, spin spectrum shape: {spectra_4tuple[3].shape}')
-	# print(f'first two values of energies: {spectra_4tuple[1][:,:2]}, last two {spectra_4tuple[1][:,-2:]}')
-	# exit()
-	full_spectrum_obj=FullSpectrum(None,state_params,physical_params,None)
-	system_expectations,cluster_expectations=full_spectrum_obj.get_cluster_thermodynamic_expectations(spectra_4tuple,None)
-
-	print(f"system energy density: {system_expectations[0]/lattice_points}",
-	   	f"system energy density mu_subtracted: {(system_expectations[0]+system_expectations[1]*physical_params.mu_0)/lattice_points} "
-	   	f"system filling density: {system_expectations[1]/lattice_points}",
-		f"system spin density:{system_expectations[2]/lattice_points}")
-
-
-	
-		
-	
-
 def test_hamiltonian_inspection():
 	"""
 	Test function to inspect a single QuickHubbard1D Hamiltonian
@@ -622,49 +624,13 @@ def test_hamiltonian_inspection():
 	
 	return test_ham
 
-def test_hamiltonian_inspection_current_params():
-	"""
-	Test function to inspect QuickHubbard1D with the same parameters as test_quick_mismatched
-	"""
-	print("Creating QuickHubbard1D with test_quick_mismatched parameters...")
-	
-	# Use the same parameters as test_quick_mismatched
-	physical_params = HamiltonianParams(U=10, V=0, hopping=1, mu_0=10/2)  # mu_0 = 5
-	state_params = StatesParams(spin_states=2)
-	
-	# Create the same clusters as in the actual test
-	cluster_k_1 = np.array([0.0, np.pi])  # k-points for cluster 1
-	cluster_k_2 = np.array([np.pi/2, 3*np.pi/2])  # k-points for cluster 2
-	
-	test_basis_1 = LocalClusterBasis(cluster_k_1, state_params)
-	test_basis_2 = LocalClusterBasis(cluster_k_2, state_params)
-	
-	# Create QuickHubbard1D with these clusters
-	test_ham = QuickHubbard1D({
-		'basis_classes': [test_basis_1, test_basis_2],
-		'L': 4,  # 2 sites per cluster × 2 clusters
-		'L_cluster': 4,
-		'V': physical_params.V,
-		't': physical_params.hopping,
-		'U': physical_params.U,
-		'mu': physical_params.mu_0,
-	})
-	
-	print(f"Parameters: U={physical_params.U}, V={physical_params.V}, t={physical_params.hopping}, mu_0={physical_params.mu_0}")
-	print(f"Expected energy for half-filling: ~{-physical_params.mu_0 * 4} (4 sites × mu_0)")
-	
-	# Inspect the Hamiltonian terms
-	inspect_hamiltonian_terms(test_ham)
-	
-	return test_ham
-
 if __name__ == "__main__":
 	print('main')
 
-	# Test Hamiltonian inspection with current parameters
-	#test_hamiltonian_inspection_current_params()
+	# Test Hamiltonian inspection
+	#test_hamiltonian_inspection()
 	
-	#exit('Inspected Hamiltonian - check chemical potential terms')
+	#exit('Inspected Hamiltonian - check that coupling is correct')
 	
 	lattice_points=16
 	cluster_size=2
