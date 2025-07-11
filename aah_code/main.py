@@ -11,7 +11,7 @@ from aah_code.clusters import ClusterExperiment
 from aah_code.basis import LocalClusterBasis
 from aah_code.hamiltonian import FullSpectrum, Hubbard1D, SpectrumSolver
 from aah_code.global_params import StatesParams, HamiltonianParams
-from aah_code.real_space_dmrg import get_gnd
+from aah_code.real_space_dmrg import get_gnd, get_gnd_infinite
 
 
 def run_twosite(U,mu_0,V,t=1,system_size=10):
@@ -87,7 +87,7 @@ def run_dmrg_method(U, mu_0, V=0, t=1, system_size=10, chi=32):
     Returns:
         (energy, filling): Total energy and filling
     """
-    energy, psi, filling = get_gnd(L=system_size, chi=chi, U=U, t=t, mu=mu_0, V=V)
+    energy, psi, filling = get_gnd_infinite(chi=chi, U=U, t=t, mu=mu_0, V=V)
     
     return energy, filling
 

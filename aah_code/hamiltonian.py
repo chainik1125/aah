@@ -237,9 +237,11 @@ class QuickHubbard1D(CouplingMPOModel):
 				
 				
 				#Add the onsite alpha U only to sites in this subcluster
-				for alpha in range(len(self.lat.unit_cell)):
-					for site_idx in range(L_start, L_end):
-						self.add_onsite(U, alpha, 'NuNd', site_idx)  # Hubbard n_up n_down term
+				# for alpha in range(len(self.lat.unit_cell)):
+				# 	for site_idx in range(L_start, L_end):
+				# 		self.add_onsite(U, alpha, 'NuNd', site_idx)  # Hubbard n_up n_down term
+			for alpha in range(len(self.lat.unit_cell)):
+				self.add_onsite(U, alpha, 'NuNd')  # Hubbard n_up n_down term
 					
 			#Add V as next-nearest neighbor coupling (site 0<->2, site 1<->3)
 			if abs(V) > 0:
@@ -350,7 +352,7 @@ class FullSpectrum():
 		number_spectrum=np.stack(number_spectrum,axis=0)
 		spin_spectrum=np.stack(spin_spectrum,axis=0)
 
-		logger.info(f'spin spectrum shape: {spin_spectrum.shape}')
+		logger.debug(f'spin spectrum shape: {spin_spectrum.shape}')
 		
 
 		return k_points,energy_spectrum,number_spectrum,spin_spectrum
@@ -473,8 +475,12 @@ def get_spectra(cluster_ks, state_params, physical_params):
 					'mu':physical_params.mu_0,
 					})
 		
+		
+		
+		
 		solver=SpectrumSolver(test_ham,None)#basis object never explicitly used anyway
 		eigvals,eigvecs,n_ups,n_downs,n_tot=solver.solve_spectrum()
+		
 
 
 		k_points.append(cluster_k)
@@ -710,8 +716,8 @@ def compare_all_methods_vs_U(U_values, V=0, t=1):
 	fillings_cluster_2site = []
 	fillings_cluster_4site = []
 	
-	system_size = 10  # For DMRG and 2-site cluster method
-	lattice_points = 16  # For 4-site cluster method
+	system_size = 100  # For DMRG and 2-site cluster method
+	lattice_points = 100  # For 4-site cluster method
 	cluster_size = 2
 	chi = 32
 	
@@ -725,10 +731,14 @@ def compare_all_methods_vs_U(U_values, V=0, t=1):
 		# 1. DMRG method
 		print("Running DMRG...")
 		energy_dmrg, filling_dmrg = run_dmrg_method(U, mu_0, V, t, system_size, chi)
-		energy_dmrg_subtracted = energy_dmrg + (mu_0 * filling_dmrg * system_size)
-		energies_dmrg.append(energy_dmrg_subtracted / system_size)
+		#finite dmrg
+		# energy_dmrg_subtracted = energy_dmrg + (mu_0 * filling_dmrg * system_size)
+		# energies_dmrg.append(energy_dmrg_subtracted / system_size)
+		# fillings_dmrg.append(filling_dmrg)
+		#infinite dmrg
+		energy_dmrg_subtracted = energy_dmrg + (mu_0 * filling_dmrg)
+		energies_dmrg.append(energy_dmrg_subtracted)
 		fillings_dmrg.append(filling_dmrg)
-		
 		# 2. Two-site analytical
 		print("Running two-site analytical...")
 		energy_twosite = run_twosite(U, mu_0, V, t, system_size)
@@ -891,7 +901,7 @@ if __name__ == "__main__":
 	#fig=quick_spectrum_test_vary_U(U_values,V=0)
 	#fig.show()
 
-	compare_all_methods_vs_U(U_values,V=5,t=1).show()
+	compare_all_methods_vs_U(U_values,V=0,t=1).show()
 	#fig.write_html("quick_spectrum_test.html")
 	#print("Quick spectrum test saved as 'quick_spectrum_test.html'")
 

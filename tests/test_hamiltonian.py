@@ -2,8 +2,9 @@ import pytest
 import numpy as np
 from aah_code.clusters import ClusterExperiment
 from aah_code.basis import LocalClusterBasis
-from aah_code.hamiltonian import Hubbard1D
+from aah_code.hamiltonian import Hubbard1D,FullSpectrum,SpectrumSolver, get_spectra
 from aah_code.global_params import StatesParams, HamiltonianParams
+
 import tenpy as tp
 import logging
 from tenpy.algorithms import exact_diag
@@ -323,3 +324,44 @@ class TestHamiltonian:
                 raise AssertionError(f"Energy mismatch for {test_cluster_ks}. Expected: {exact_gs}, Got: {test_ham_eigvals[0]}") from e
 
         
+    def test_fourparticle_reduces(self):
+        """
+        Test that for V=0, the four particle Hamiltnoian gives the same energies
+        as two two particle ones at the correct separation.
+        """
+
+        shift=np.pi
+        start=np.array([[-np.pi],[-np.pi/4]])
+        test_ks=[start,start+shift]
+        stacked_test_ks=np.stack([np.stack([start,start+shift],axis=0)],axis=0)
+        
+        state_params=StatesParams(spin_states=2)
+
+        U=1
+        V=0
+        t=1
+        mu_0=U/2
+        physical_params = HamiltonianParams(U, V, t, mu_0)
+
+        #Get energies for the two two particle clusters
+        full_spectrum_object = FullSpectrum(test_ks, state_params, physical_params)
+        cluster_spectra = full_spectrum_object.get_full_spectrum()
+        k_points,energy_spectrum,number_spectrum,spin_spectrum=cluster_spectra
+
+        log.debug(f"energy_spectrum shape: {energy_spectrum.shape}")
+
+        #Now do the same for the four site
+        
+
+        spectra_4tuple=get_spectra(stacked_test_ks, state_params, physical_params)
+
+        k_points_4,energy_spectrum_4,number_spectrum_4,spin_spectrum_4=spectra_4tuple
+
+        log.debug(f'k_points shape: {k_points_4.shape},energy shape: {energy_spectrum_4.shape}')
+
+
+        log.debug(f'first two energies clusters: {energy_spectrum[:,:2]}, first two energies 4: {energy_spectrum_4[:,:2]}')
+        
+
+        
+        return None
