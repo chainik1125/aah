@@ -888,14 +888,14 @@ def compare_all_methods_vs_U(U_values, V=0, t=1):
 	fig.update_layout(
 		title=f'Method Comparison: DMRG vs Analytical vs Cluster Methods (V={V})',
 		showlegend=True,
-		height=500
+		#height=500
 	)
 	
 	# Update axes
 	fig.update_xaxes(title_text="U", row=1, col=1)
 	fig.update_yaxes(title_text="Energy Density", row=1, col=1)
 	fig.update_xaxes(title_text="U", row=1, col=2)
-	fig.update_yaxes(title_text="Filling Density", row=1, col=2)
+	fig.update_yaxes(title_text="Filling Density", range=[0,2],row=1, col=2)
 	
 	return fig
 
@@ -914,7 +914,7 @@ if __name__ == "__main__":
 	#fig=quick_spectrum_test_vary_U(U_values,V=0)
 	#fig.show()
 
-	compare_all_methods_vs_U(U_values,V=0,t=1).show()
+	compare_all_methods_vs_U(U_values,V=5,t=1).show()
 	#fig.write_html("quick_spectrum_test.html")
 	#print("Quick spectrum test saved as 'quick_spectrum_test.html'")
 
