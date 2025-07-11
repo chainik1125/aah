@@ -196,8 +196,6 @@ class QuickHubbard1D(CouplingMPOModel):
 				mu_eff=mu_0-mu_tilde
 
 				
-				
-
 				for alpha in range(len(self.lat.unit_cell)):
 					for site_idx in range(L_start, L_end):
 						#self.add_onsite(-mu_eff/4, alpha, 'Nu', site_idx)  # chemical potential n_up
@@ -227,11 +225,12 @@ class QuickHubbard1D(CouplingMPOModel):
 						cluster_k_points=basis_object.cluster_k_points
 						# Calculate t_tilde for dx=1 within this cluster
 						t_tilde=(1/2)*(1/cluster_size)*np.array([2*t*np.cos(cluster_k_points[j])*(1/2)*2*t*np.cos(1*2*np.pi*j/cluster_size) for j in range(cluster_size)]).sum()
-						
+						#NOTE!IMPORTANT!: here you are only adding once, so you dont need to halve
+						#so to correct you should mutiply t_tilde by 2
 						# Add hopping between the two sites in this cluster: L_start <--> L_start+1
 						i1, i2 = L_start, L_start + 1
-						self.add_coupling_term(t_tilde, i1, i2, 'Cdd', 'Cd', plus_hc=True)
-						self.add_coupling_term(t_tilde, i1, i2, 'Cdu', 'Cu', plus_hc=True)
+						self.add_coupling_term(2*t_tilde, i1, i2, 'Cdd', 'Cd', plus_hc=True)
+						self.add_coupling_term(2*t_tilde, i1, i2, 'Cdu', 'Cu', plus_hc=True)
 				
 				
 				
@@ -322,11 +321,12 @@ class FullSpectrum():
 
 		
 
-	def get_full_spectrum(self):
+	def get_full_spectrum(self,return_ham:bool=False):
 		k_points=[]
 		energy_spectrum=[]
 		number_spectrum=[]
 		spin_spectrum=[]
+		ham_objects=[]
 		for cluster_k in self.clustered_k_points:		
 			cluster_object=LocalClusterBasis(cluster_k,self.state_params)
 			hamiltonian_object=Hubbard1D({'basis_class':cluster_object,
@@ -344,6 +344,8 @@ class FullSpectrum():
 			energy_spectrum.append(eigvals)
 			number_spectrum.append(n_tot)
 			spin_spectrum.append(np.array([n_ups,n_downs]))
+			if return_ham:
+				ham_objects.append(hamiltonian_object)
 
 			
 		
@@ -353,9 +355,11 @@ class FullSpectrum():
 		spin_spectrum=np.stack(spin_spectrum,axis=0)
 
 		logger.debug(f'spin spectrum shape: {spin_spectrum.shape}')
-		
 
-		return k_points,energy_spectrum,number_spectrum,spin_spectrum
+		if return_ham:
+			return ham_objects
+		else:
+			return k_points,energy_spectrum,number_spectrum,spin_spectrum
 		
 
 	def get_cluster_thermodynamic_expectations(self,full_spectrum_4tuple:tuple,temperature:Union[None,float]=None):
@@ -454,13 +458,14 @@ class MismatchedQuick():
 			logger.info('No new k-clusters found')
 			return np.array([])
 
-def get_spectra(cluster_ks, state_params, physical_params):
+def get_spectra(cluster_ks, state_params, physical_params,return_ham:bool=False):
 	#Lets try to make the hamiltonian
 
 	k_points=[]
 	energy_spectrum=[]
 	number_spectrum=[]
 	spin_spectrum=[]
+	ham_objects=[]
 
 	for cluster_k in cluster_ks:
 		total_cluster_size=cluster_k.shape[0]*cluster_k.shape[1]
@@ -478,6 +483,7 @@ def get_spectra(cluster_ks, state_params, physical_params):
 		
 		
 		
+		
 		solver=SpectrumSolver(test_ham,None)#basis object never explicitly used anyway
 		eigvals,eigvecs,n_ups,n_downs,n_tot=solver.solve_spectrum()
 		
@@ -487,6 +493,8 @@ def get_spectra(cluster_ks, state_params, physical_params):
 		energy_spectrum.append(eigvals)
 		number_spectrum.append(n_tot)
 		spin_spectrum.append(np.array([n_ups,n_downs]))
+		if return_ham:
+			ham_objects.append(test_ham)
 
 			
 		
@@ -497,8 +505,10 @@ def get_spectra(cluster_ks, state_params, physical_params):
 
 	logger.info(f'spin spectrum shape: {spin_spectrum.shape}')
 		
-
-	return k_points,energy_spectrum,number_spectrum,spin_spectrum
+	if return_ham:
+		return ham_objects
+	else:
+		return k_points,energy_spectrum,number_spectrum,spin_spectrum
 
 
 
@@ -560,25 +570,28 @@ def inspect_hamiltonian_terms(hamiltonian):
 	
 	# Onsite terms - need to extract from the OnsiteTerms objects
 	if hasattr(hamiltonian, 'onsite_terms') and hamiltonian.onsite_terms:
-		for site_idx, onsite_term in hamiltonian.onsite_terms.items():
-			# Try to access the terms dictionary directly
-			if hasattr(onsite_term, '_terms'):
-				for op_name, strength in onsite_term._terms.items():
-					description = f"Site {site_idx}"
-					print(f"| Onsite    | {site_idx:7} | {op_name:11} | {strength:8.3f} | N/A    | {description:11} |")
+		for term_name, onsite_term in hamiltonian.onsite_terms.items():
+			# Access the actual terms list
+			if hasattr(onsite_term, 'onsite_terms'):
+				for site_idx, site_terms in enumerate(onsite_term.onsite_terms):
+					for op_name, strength in site_terms.items():
+						description = f"Site {site_idx}"
+						print(f"| Onsite    | {site_idx:7} | {op_name:11} | {strength:8.3f} | N/A    | {description:11} |")
 	
 	# Coupling terms - need to extract from CouplingTerms objects
 	if hasattr(hamiltonian, 'coupling_terms') and hamiltonian.coupling_terms:
 		for term_name, coupling_term in hamiltonian.coupling_terms.items():
-			if hasattr(coupling_term, '_terms'):
-				for term_key, strength in coupling_term._terms.items():
-					# term_key format: ((u1, u2), (i1, i2), dx)
-					u_pair = term_key[0] if len(term_key) > 0 else (0,0)
-					site_pair = term_key[1] if len(term_key) > 1 else (0,0)
-					dx = term_key[2] if len(term_key) > 2 else 0
-					sites = f"{site_pair}"
-					description = f"dx={dx}, u={u_pair}"
-					print(f"| Coupling  | {sites:7} | {term_name:11} | {strength:8.3f} | {dx:6} | {description:11} |")
+			if hasattr(coupling_term, 'coupling_terms'):
+				# The coupling_terms attribute contains nested dictionaries
+				for i, site_terms in coupling_term.coupling_terms.items():
+					for op_pair, target_sites in site_terms.items():
+						op_name = f"{op_pair[0]} {op_pair[1]}"
+						for j, operators in target_sites.items():
+							dx = j - i
+							for target_op, strength in operators.items():
+								sites = f"({i},{j})"
+								description = f"dx={dx}"
+								print(f"| Coupling  | {sites:7} | {op_name:11} | {strength:8.3f} | {dx:6} | {description:11} |")
 	
 	# Method 2: Alternative inspection using dir() 
 	print("\n2. DETAILED TERM INSPECTION:")
