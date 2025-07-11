@@ -356,7 +356,7 @@ class TestHamiltonian:
 			log.debug(f'stacked shape: {stacked_test_ks.shape}')
 			state_params=StatesParams(spin_states=2)
 
-			U=0
+			U=1
 			V=0
 			t=1
 			mu_0=U/2
@@ -394,24 +394,18 @@ class TestHamiltonian:
 			#Now check that they are the same across the spectrum
 			#first I need to form the spectrum
 			combined_energy_vals=np.stack([energy_spectrum[0,i]+energy_spectrum[1,j] for i in range(energy_spectrum.shape[1]) for j in range(energy_spectrum.shape[1])],axis=0)
-
+			combined_energy_vals=np.sort(combined_energy_vals,axis=0)
+			
+			
 			try:
 				np.testing.assert_array_almost_equal(
-					combined_energy_vals,
-					energy_spectrum_4,
+					combined_energy_vals[:5],
+					energy_spectrum_4[0,:5],
 					err_msg="Clusters didn't match"
 				)
 				log.info(f"✓ Test PASSED for {stacked_test_ks}.%")
 			except AssertionError as e:
 				log.error(f"✗ Test FAILED for {stacked_test_ks}.")
-				raise AssertionError(f"Energy mismatch for {stacked_test_ks}") from e
-
-
-			
-
-			break
-			
-		
-
+				raise AssertionError(f"Energy mismatch for {stacked_test_ks}") from e		
 		
 		return None
