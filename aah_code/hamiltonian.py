@@ -899,7 +899,217 @@ def compare_all_methods_vs_U(U_values, V=0, t=1):
 	
 	return fig
 
-def compare_methods_heatmap(U_values, V_values, t=1):
+def compare_methods_line_plots(U_values, V_values, t=1, precomputed_results=None):
+	"""
+	Create line plots showing all four methods for varying U at fixed V values.
+	Each figure shows 2x3 subplots (energy top row, filling bottom row).
+	If more than 3 V values, creates multiple figures.
+	
+	Args:
+		U_values: Array of U values
+		V_values: Array of V values
+		t: Hopping parameter
+		precomputed_results: Optional dict with pre-computed results to avoid re-solving
+	"""
+	from aah_code.main import run_cluster_method, run_dmrg_method, run_twosite
+	import math
+	
+	# Group V values into chunks of 3
+	n_v_per_fig = 3
+	n_figures = math.ceil(len(V_values) / n_v_per_fig)
+	figures = []
+	
+	# Use pre-computed results if provided, otherwise compute
+	if precomputed_results is not None:
+		print("Using pre-computed results for line plots")
+		all_results = precomputed_results
+	else:
+		# Pre-compute all results (same as in heatmap function)
+		print(f"Computing line plots for U values: {U_values}")
+		print(f"V values: {V_values}")
+		print(f"t = {t}")
+		
+		# Storage for all results
+		all_results = {}
+		
+		system_size = 100
+		lattice_points = 100
+		cluster_size = 2
+		chi = 32
+		
+		for i, V in enumerate(V_values):
+			print(f"\nComputing for V = {V}")
+			
+			# Initialize storage for this V
+			all_results[V] = {
+				'energies_dmrg': [],
+				'energies_twosite': [],
+				'energies_cluster_2site': [],
+				'energies_cluster_4site': [],
+				'fillings_dmrg': [],
+				'fillings_twosite': [],
+				'fillings_cluster_2site': [],
+				'fillings_cluster_4site': []
+			}
+			
+			for j, U in enumerate(U_values):
+				mu_0 = U / 2
+				print(f"  U = {U}, μ₀ = {mu_0}")
+				
+				# Run all methods
+				energy_dmrg, filling_dmrg = run_dmrg_method(U, mu_0, V, t, system_size, chi)
+				energy_dmrg_subtracted = energy_dmrg + (mu_0 * filling_dmrg)
+				
+				energy_twosite = run_twosite(U, mu_0, V, t, system_size)
+				filling_twosite = 1.0
+				
+				energy_cluster_2, filling_cluster_2 = run_cluster_method(U, mu_0, V, t, system_size)
+				energy_cluster_2_subtracted = (energy_cluster_2 + mu_0 * filling_cluster_2) / system_size
+				filling_cluster_2_normalized = filling_cluster_2 / system_size
+				
+				physical_params = HamiltonianParams(U, V, t, mu_0)
+				system_expectations, _ = test_quick_mismatched(lattice_points, cluster_size, physical_params)
+				total_energy, total_filling, _ = system_expectations
+				energy_cluster_4_subtracted = (total_energy + physical_params.mu_0 * total_filling) / lattice_points
+				filling_cluster_4_normalized = total_filling / lattice_points
+				
+				# Store results
+				all_results[V]['energies_dmrg'].append(energy_dmrg_subtracted)
+				all_results[V]['energies_twosite'].append(energy_twosite)
+				all_results[V]['energies_cluster_2site'].append(energy_cluster_2_subtracted)
+				all_results[V]['energies_cluster_4site'].append(energy_cluster_4_subtracted)
+				all_results[V]['fillings_dmrg'].append(filling_dmrg)
+				all_results[V]['fillings_twosite'].append(filling_twosite)
+				all_results[V]['fillings_cluster_2site'].append(filling_cluster_2_normalized)
+				all_results[V]['fillings_cluster_4site'].append(filling_cluster_4_normalized)
+	
+	# Create figures
+	for fig_idx in range(n_figures):
+		start_idx = fig_idx * n_v_per_fig
+		end_idx = min(start_idx + n_v_per_fig, len(V_values))
+		current_V_values = V_values[start_idx:end_idx]
+		n_cols = len(current_V_values)
+		
+		fig = make_subplots(
+			rows=2, cols=n_cols,
+			subplot_titles=[f'Energy vs U (V={V:.2f})' for V in current_V_values] + 
+						   [f'Filling vs U (V={V:.1f})' for V in current_V_values],
+			vertical_spacing=0.15
+		)
+		
+		colors = {'DMRG': 'red', 'Two-site': 'green', '2-site Cluster': 'blue', '4-site Cluster': 'purple'}
+		
+		for col_idx, V in enumerate(current_V_values):
+			col = col_idx + 1
+			
+			# Energy plots (top row)
+			fig.add_trace(
+				go.Scatter(
+					x=U_values, y=all_results[V]['energies_dmrg'],
+					mode='lines+markers', name='DMRG',
+					line=dict(color=colors['DMRG'], width=2),
+					marker=dict(size=6),
+					showlegend=(col_idx == 0)
+				),
+				row=1, col=col
+			)
+			
+			fig.add_trace(
+				go.Scatter(
+					x=U_values, y=all_results[V]['energies_twosite'],
+					mode='lines+markers', name='Two-site',
+					line=dict(color=colors['Two-site'], width=2),
+					marker=dict(size=6),
+					showlegend=(col_idx == 0)
+				),
+				row=1, col=col
+			)
+			
+			fig.add_trace(
+				go.Scatter(
+					x=U_values, y=all_results[V]['energies_cluster_2site'],
+					mode='lines+markers', name='2-site Cluster',
+					line=dict(color=colors['2-site Cluster'], width=2),
+					marker=dict(size=6),
+					showlegend=(col_idx == 0)
+				),
+				row=1, col=col
+			)
+			
+			fig.add_trace(
+				go.Scatter(
+					x=U_values, y=all_results[V]['energies_cluster_4site'],
+					mode='lines+markers', name='4-site Cluster',
+					line=dict(color=colors['4-site Cluster'], width=2),
+					marker=dict(size=6),
+					showlegend=(col_idx == 0)
+				),
+				row=1, col=col
+			)
+			
+			# Filling plots (bottom row)
+			fig.add_trace(
+				go.Scatter(
+					x=U_values, y=all_results[V]['fillings_dmrg'],
+					mode='lines+markers', name='DMRG',
+					line=dict(color=colors['DMRG'], width=2),
+					marker=dict(size=6),
+					showlegend=False
+				),
+				row=2, col=col
+			)
+			
+			fig.add_trace(
+				go.Scatter(
+					x=U_values, y=all_results[V]['fillings_twosite'],
+					mode='lines+markers', name='Two-site',
+					line=dict(color=colors['Two-site'], width=2),
+					marker=dict(size=6),
+					showlegend=False
+				),
+				row=2, col=col
+			)
+			
+			fig.add_trace(
+				go.Scatter(
+					x=U_values, y=all_results[V]['fillings_cluster_2site'],
+					mode='lines+markers', name='2-site Cluster',
+					line=dict(color=colors['2-site Cluster'], width=2),
+					marker=dict(size=6),
+					showlegend=False
+				),
+				row=2, col=col
+			)
+			
+			fig.add_trace(
+				go.Scatter(
+					x=U_values, y=all_results[V]['fillings_cluster_4site'],
+					mode='lines+markers', name='4-site Cluster',
+					line=dict(color=colors['4-site Cluster'], width=2),
+					marker=dict(size=6),
+					showlegend=False
+				),
+				row=2, col=col
+			)
+		
+		# Update layout
+		fig.update_layout(
+			title=f'Method Comparison Line Plots (Figure {fig_idx + 1}/{n_figures})',
+			showlegend=True
+		)
+		
+		# Update axes
+		for col in range(1, n_cols + 1):
+			fig.update_xaxes(title_text="U", row=1, col=col)
+			fig.update_yaxes(title_text="Energy Density", row=1, col=col)
+			fig.update_xaxes(title_text="U", row=2, col=col)
+			fig.update_yaxes(title_text="Filling Density", range=[0, 2], row=2, col=col)
+		
+		figures.append(fig)
+	
+	return figures
+
+def compare_methods_heatmap(U_values, V_values, t=1, show_line_plots=False):
 	"""
 	Create a heatmap comparing methods with energy relative differences to DMRG (top row) 
 	and filling (bottom row). Columns are reordered as: 2-site cluster (col 1), 4-site (col 2), 2-site analytical (col 3)
@@ -932,6 +1142,9 @@ def compare_methods_heatmap(U_values, V_values, t=1):
 	filling_4site_cluster = np.zeros((n_V, n_U))
 	filling_2site_analytical = np.zeros((n_V, n_U))
 	
+	# Storage for line plots (if needed)
+	line_plot_results = {}
+	
 	system_size = 100  # For DMRG and 2-site cluster method
 	lattice_points = 100  # For 4-site cluster method
 	cluster_size = 2
@@ -942,6 +1155,19 @@ def compare_methods_heatmap(U_values, V_values, t=1):
 	print(f"t = {t}")
 	
 	for i, V in enumerate(V_values):
+		# Initialize storage for this V (for line plots)
+		if show_line_plots:
+			line_plot_results[V] = {
+				'energies_dmrg': [],
+				'energies_twosite': [],
+				'energies_cluster_2site': [],
+				'energies_cluster_4site': [],
+				'fillings_dmrg': [],
+				'fillings_twosite': [],
+				'fillings_cluster_2site': [],
+				'fillings_cluster_4site': []
+			}
+		
 		for j, U in enumerate(U_values):
 			mu_0 = U / 2  # Half-filling condition
 			print(f"\nComputing U = {U}, V = {V}, μ₀ = {mu_0}")
@@ -980,6 +1206,17 @@ def compare_methods_heatmap(U_values, V_values, t=1):
 			filling_4site_cluster[i, j] = filling_cluster_4_normalized
 			filling_2site_analytical[i, j] = filling_twosite
 			
+			# Store results for line plots if needed
+			if show_line_plots:
+				line_plot_results[V]['energies_dmrg'].append(energy_dmrg_subtracted)
+				line_plot_results[V]['energies_twosite'].append(energy_twosite)
+				line_plot_results[V]['energies_cluster_2site'].append(energy_cluster_2_subtracted)
+				line_plot_results[V]['energies_cluster_4site'].append(energy_cluster_4_subtracted)
+				line_plot_results[V]['fillings_dmrg'].append(filling_dmrg)
+				line_plot_results[V]['fillings_twosite'].append(filling_twosite)
+				line_plot_results[V]['fillings_cluster_2site'].append(filling_cluster_2_normalized)
+				line_plot_results[V]['fillings_cluster_4site'].append(filling_cluster_4_normalized)
+			
 			print(f"DMRG:              E={energy_dmrg_subtracted:.3f}, n={filling_dmrg:.3f}")
 			print(f"Two-site:          E={energy_twosite:.3f}, n={filling_twosite:.3f}, diff={energy_diff_2site_analytical[i,j]:.1f}%")
 			print(f"Cluster (2-site):  E={energy_cluster_2_subtracted:.3f}, n={filling_cluster_2_normalized:.3f}, diff={energy_diff_2site_cluster[i,j]:.1f}%")
@@ -1006,6 +1243,9 @@ def compare_methods_heatmap(U_values, V_values, t=1):
 			zmin=-max_abs_energy_diff,
 			zmax=max_abs_energy_diff,
 			showscale=False,
+			text=[[f"{energy_diff_2site_cluster[i,j]:.1f}%" for j in range(len(U_values))] for i in range(len(V_values))],
+			texttemplate="%{text}",
+			textfont={"size": 10},
 			hovertemplate='U=%{x}<br>V=%{y}<br>Energy Diff: %{z:.1f}%<extra></extra>'
 		),
 		row=1, col=1
@@ -1021,6 +1261,9 @@ def compare_methods_heatmap(U_values, V_values, t=1):
 			zmin=-max_abs_energy_diff,
 			zmax=max_abs_energy_diff,
 			showscale=False,
+			text=[[f"{energy_diff_4site_cluster[i,j]:.1f}%" for j in range(len(U_values))] for i in range(len(V_values))],
+			texttemplate="%{text}",
+			textfont={"size": 10},
 			hovertemplate='U=%{x}<br>V=%{y}<br>Energy Diff: %{z:.1f}%<extra></extra>'
 		),
 		row=1, col=2
@@ -1036,6 +1279,9 @@ def compare_methods_heatmap(U_values, V_values, t=1):
 			zmin=-max_abs_energy_diff,
 			zmax=max_abs_energy_diff,
 			colorbar=dict(title="Energy Diff (%)", x=1.02, y=0.8, len=0.4),
+			text=[[f"{energy_diff_2site_analytical[i,j]:.1f}%" for j in range(len(U_values))] for i in range(len(V_values))],
+			texttemplate="%{text}",
+			textfont={"size": 10},
 			hovertemplate='U=%{x}<br>V=%{y}<br>Energy Diff: %{z:.1f}%<extra></extra>'
 		),
 		row=1, col=3
@@ -1051,6 +1297,9 @@ def compare_methods_heatmap(U_values, V_values, t=1):
 			zmin=0,
 			zmax=2,
 			showscale=False,
+			text=[[f"{filling_2site_cluster[i,j]:.2f}" for j in range(len(U_values))] for i in range(len(V_values))],
+			texttemplate="%{text}",
+			textfont={"size": 10},
 			hovertemplate='U=%{x}<br>V=%{y}<br>Filling: %{z:.3f}<extra></extra>'
 		),
 		row=2, col=1
@@ -1065,6 +1314,9 @@ def compare_methods_heatmap(U_values, V_values, t=1):
 			zmin=0,
 			zmax=2,
 			showscale=False,
+			text=[[f"{filling_4site_cluster[i,j]:.2f}" for j in range(len(U_values))] for i in range(len(V_values))],
+			texttemplate="%{text}",
+			textfont={"size": 10},
 			hovertemplate='U=%{x}<br>V=%{y}<br>Filling: %{z:.3f}<extra></extra>'
 		),
 		row=2, col=2
@@ -1079,6 +1331,9 @@ def compare_methods_heatmap(U_values, V_values, t=1):
 			zmin=0,
 			zmax=2,
 			colorbar=dict(title="Filling", x=1.02, y=0.25, len=0.4),
+			text=[[f"{filling_2site_analytical[i,j]:.2f}" for j in range(len(U_values))] for i in range(len(V_values))],
+			texttemplate="%{text}",
+			textfont={"size": 10},
 			hovertemplate='U=%{x}<br>V=%{y}<br>Filling: %{z:.3f}<extra></extra>'
 		),
 		row=2, col=3
@@ -1097,7 +1352,12 @@ def compare_methods_heatmap(U_values, V_values, t=1):
 		fig.update_xaxes(title_text="U", row=2, col=col)
 		fig.update_yaxes(title_text="V", row=2, col=col)
 	
-	return fig
+	# Optionally generate line plots
+	if show_line_plots:
+		line_plot_figures = compare_methods_line_plots(U_values, V_values, t, precomputed_results=line_plot_results)
+		return fig, line_plot_figures
+	else:
+		return fig
 
 if __name__ == "__main__":
 	print('main')
@@ -1110,10 +1370,13 @@ if __name__ == "__main__":
 	#lattice_points=16
 	#cluster_size=2
 	#test_quick_mismatched(lattice_points,cluster_size)
-	U_values=np.linspace(0,2,2)
-	V_values=np.linspace(0,2,2)
+	U_values=np.linspace(1e-6,5,5)
+	V_values=np.linspace(0,5,5)
 
-	compare_methods_heatmap(U_values,V_values).show()
+	fig,line_figs=compare_methods_heatmap(U_values,V_values,show_line_plots=True)
+	fig.show()
+	for line_fig in line_figs:
+		line_fig.show()
 	#fig=quick_spectrum_test_vary_U(U_values,V=0)
 	#fig.show()
 
