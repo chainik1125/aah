@@ -899,6 +899,206 @@ def compare_all_methods_vs_U(U_values, V=0, t=1):
 	
 	return fig
 
+def compare_methods_heatmap(U_values, V_values, t=1):
+	"""
+	Create a heatmap comparing methods with energy relative differences to DMRG (top row) 
+	and filling (bottom row). Columns are reordered as: 2-site cluster (col 1), 4-site (col 2), 2-site analytical (col 3)
+	"""
+	from aah_code.main import run_cluster_method, run_dmrg_method, run_twosite
+	
+	fig = make_subplots(
+		rows=2, cols=3,
+		subplot_titles=[
+			'2-site Cluster vs DMRG (Energy Diff %)', 
+			'4-site Cluster vs DMRG (Energy Diff %)', 
+			'2-site Analytical vs DMRG (Energy Diff %)',
+			'2-site Cluster Filling', 
+			'4-site Cluster Filling', 
+			'2-site Analytical Filling'
+		],
+		vertical_spacing=0.15
+	)
+	
+	# Initialize result arrays
+	n_U, n_V = len(U_values), len(V_values)
+	
+	# Energy relative differences (percentage)
+	energy_diff_2site_cluster = np.zeros((n_V, n_U))
+	energy_diff_4site_cluster = np.zeros((n_V, n_U))
+	energy_diff_2site_analytical = np.zeros((n_V, n_U))
+	
+	# Fillings
+	filling_2site_cluster = np.zeros((n_V, n_U))
+	filling_4site_cluster = np.zeros((n_V, n_U))
+	filling_2site_analytical = np.zeros((n_V, n_U))
+	
+	system_size = 100  # For DMRG and 2-site cluster method
+	lattice_points = 100  # For 4-site cluster method
+	cluster_size = 2
+	chi = 32
+	
+	print(f"Computing heatmap for U values: {U_values}")
+	print(f"V values: {V_values}")
+	print(f"t = {t}")
+	
+	for i, V in enumerate(V_values):
+		for j, U in enumerate(U_values):
+			mu_0 = U / 2  # Half-filling condition
+			print(f"\nComputing U = {U}, V = {V}, μ₀ = {mu_0}")
+			
+			# 1. DMRG method (reference)
+			print("Running DMRG...")
+			energy_dmrg, filling_dmrg = run_dmrg_method(U, mu_0, V, t, system_size, chi)
+			energy_dmrg_subtracted = energy_dmrg + (mu_0 * filling_dmrg)
+			
+			# 2. Two-site analytical
+			print("Running two-site analytical...")
+			energy_twosite = run_twosite(U, mu_0, V, t, system_size)
+			filling_twosite = 1.0  # Half-filling by construction
+			
+			# 3. Cluster method (2-site clusters)
+			print("Running 2-site cluster method...")
+			energy_cluster_2, filling_cluster_2 = run_cluster_method(U, mu_0, V, t, system_size)
+			energy_cluster_2_subtracted = (energy_cluster_2 + mu_0 * filling_cluster_2) / system_size
+			filling_cluster_2_normalized = filling_cluster_2 / system_size
+			
+			# 4. Four-site cluster method
+			print("Running 4-site cluster method...")
+			physical_params = HamiltonianParams(U, V, t, mu_0)
+			system_expectations, _ = test_quick_mismatched(lattice_points, cluster_size, physical_params)
+			total_energy, total_filling, _ = system_expectations
+			energy_cluster_4_subtracted = (total_energy + physical_params.mu_0 * total_filling) / lattice_points
+			filling_cluster_4_normalized = total_filling / lattice_points
+			
+			# Calculate relative energy differences as percentages
+			energy_diff_2site_cluster[i, j] = 100 * (energy_cluster_2_subtracted - energy_dmrg_subtracted) / abs(energy_dmrg_subtracted)
+			energy_diff_4site_cluster[i, j] = 100 * (energy_cluster_4_subtracted - energy_dmrg_subtracted) / abs(energy_dmrg_subtracted)
+			energy_diff_2site_analytical[i, j] = 100 * (energy_twosite - energy_dmrg_subtracted) / abs(energy_dmrg_subtracted)
+			
+			# Store fillings
+			filling_2site_cluster[i, j] = filling_cluster_2_normalized
+			filling_4site_cluster[i, j] = filling_cluster_4_normalized
+			filling_2site_analytical[i, j] = filling_twosite
+			
+			print(f"DMRG:              E={energy_dmrg_subtracted:.3f}, n={filling_dmrg:.3f}")
+			print(f"Two-site:          E={energy_twosite:.3f}, n={filling_twosite:.3f}, diff={energy_diff_2site_analytical[i,j]:.1f}%")
+			print(f"Cluster (2-site):  E={energy_cluster_2_subtracted:.3f}, n={filling_cluster_2_normalized:.3f}, diff={energy_diff_2site_cluster[i,j]:.1f}%")
+			print(f"Cluster (4-site):  E={energy_cluster_4_subtracted:.3f}, n={filling_cluster_4_normalized:.3f}, diff={energy_diff_4site_cluster[i,j]:.1f}%")
+	
+	# Calculate symmetric range for energy differences
+	all_energy_diffs = np.concatenate([
+		energy_diff_2site_cluster.flatten(),
+		energy_diff_4site_cluster.flatten(),
+		energy_diff_2site_analytical.flatten()
+	])
+	max_abs_energy_diff = np.max(np.abs(all_energy_diffs))
+	
+	# Create heatmaps
+	
+	# Top row: Energy relative differences (no individual colorbars)
+	fig.add_trace(
+		go.Heatmap(
+			z=energy_diff_2site_cluster,
+			x=U_values,
+			y=V_values,
+			colorscale='RdBu',
+			zmid=0,
+			zmin=-max_abs_energy_diff,
+			zmax=max_abs_energy_diff,
+			showscale=False,
+			hovertemplate='U=%{x}<br>V=%{y}<br>Energy Diff: %{z:.1f}%<extra></extra>'
+		),
+		row=1, col=1
+	)
+	
+	fig.add_trace(
+		go.Heatmap(
+			z=energy_diff_4site_cluster,
+			x=U_values,
+			y=V_values,
+			colorscale='RdBu',
+			zmid=0,
+			zmin=-max_abs_energy_diff,
+			zmax=max_abs_energy_diff,
+			showscale=False,
+			hovertemplate='U=%{x}<br>V=%{y}<br>Energy Diff: %{z:.1f}%<extra></extra>'
+		),
+		row=1, col=2
+	)
+	
+	fig.add_trace(
+		go.Heatmap(
+			z=energy_diff_2site_analytical,
+			x=U_values,
+			y=V_values,
+			colorscale='RdBu',
+			zmid=0,
+			zmin=-max_abs_energy_diff,
+			zmax=max_abs_energy_diff,
+			colorbar=dict(title="Energy Diff (%)", x=1.02, y=0.8, len=0.4),
+			hovertemplate='U=%{x}<br>V=%{y}<br>Energy Diff: %{z:.1f}%<extra></extra>'
+		),
+		row=1, col=3
+	)
+	
+	# Bottom row: Fillings (no individual colorbars for first two)
+	fig.add_trace(
+		go.Heatmap(
+			z=filling_2site_cluster,
+			x=U_values,
+			y=V_values,
+			colorscale='Viridis',
+			zmin=0,
+			zmax=2,
+			showscale=False,
+			hovertemplate='U=%{x}<br>V=%{y}<br>Filling: %{z:.3f}<extra></extra>'
+		),
+		row=2, col=1
+	)
+	
+	fig.add_trace(
+		go.Heatmap(
+			z=filling_4site_cluster,
+			x=U_values,
+			y=V_values,
+			colorscale='Viridis',
+			zmin=0,
+			zmax=2,
+			showscale=False,
+			hovertemplate='U=%{x}<br>V=%{y}<br>Filling: %{z:.3f}<extra></extra>'
+		),
+		row=2, col=2
+	)
+	
+	fig.add_trace(
+		go.Heatmap(
+			z=filling_2site_analytical,
+			x=U_values,
+			y=V_values,
+			colorscale='Viridis',
+			zmin=0,
+			zmax=2,
+			colorbar=dict(title="Filling", x=1.02, y=0.25, len=0.4),
+			hovertemplate='U=%{x}<br>V=%{y}<br>Filling: %{z:.3f}<extra></extra>'
+		),
+		row=2, col=3
+	)
+	
+	# Update layout
+	fig.update_layout(
+		title='Method Comparison Heatmap: Energy Differences vs DMRG (top) and Filling (bottom)',
+		showlegend=False
+	)
+	
+	# Update axes
+	for col in range(1, 4):
+		fig.update_xaxes(title_text="U", row=1, col=col)
+		fig.update_yaxes(title_text="V", row=1, col=col)
+		fig.update_xaxes(title_text="U", row=2, col=col)
+		fig.update_yaxes(title_text="V", row=2, col=col)
+	
+	return fig
+
 if __name__ == "__main__":
 	print('main')
 
@@ -910,14 +1110,29 @@ if __name__ == "__main__":
 	#lattice_points=16
 	#cluster_size=2
 	#test_quick_mismatched(lattice_points,cluster_size)
-	U_values=np.linspace(3,10,7)
+	U_values=np.linspace(0,2,2)
+	V_values=np.linspace(0,2,2)
+
+	compare_methods_heatmap(U_values,V_values).show()
 	#fig=quick_spectrum_test_vary_U(U_values,V=0)
 	#fig.show()
 
+	exit()
 	compare_all_methods_vs_U(U_values,V=5,t=1).show()
 	#fig.write_html("quick_spectrum_test.html")
 	#print("Quick spectrum test saved as 'quick_spectrum_test.html'")
 
+	# Test the new heatmap function
+	print("\nTesting new heatmap function...")
+	U_test = np.linspace(2, 6, 3)  # Small test range
+	V_test = np.linspace(0, 2, 3)  # Small test range
+	
+	try:
+		fig_heatmap = compare_methods_heatmap(U_test, V_test, t=1)
+		fig_heatmap.write_html("method_comparison_heatmap.html")
+		print("Heatmap function test successful! Saved as 'method_comparison_heatmap.html'")
+	except Exception as e:
+		print(f"Heatmap function test failed: {e}")
 	
 	exit('testing 4 site')
 
