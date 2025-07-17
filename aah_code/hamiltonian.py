@@ -6,6 +6,7 @@ There's a slightly tricky issue of how the Hamiltonian interacts with the cluste
 since you're really defining an interaction cluster rather than a full Hamiltonian cluster.
 """
 import logging
+from aah.aah_code.main import run_dmrg_method
 from aah_code.clusters import ClusterExperiment
 from aah_code.basis import LocalClusterBasis
 from aah_code.global_params import StatesParams,HamiltonianParams
@@ -20,6 +21,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import plotly.io as pio
 
+from aah_code.real_space_dmrg import run_dmrg_method, get_gnd_infinite,get_gnd
 # Set Plotly to use browser renderer to avoid nbformat issues
 pio.renderers.default = "browser"
 
@@ -743,7 +745,7 @@ def compare_all_methods_vs_U(U_values, V=0, t=1):
 		
 		# 1. DMRG method
 		print("Running DMRG...")
-		energy_dmrg, filling_dmrg = run_dmrg_method(U, mu_0, V, t, system_size, chi)
+		energy_dmrg, filling_dmrg, psi = run_dmrg_method(U, mu_0, V, t, system_size, chi)
 		#finite dmrg
 		# energy_dmrg_subtracted = energy_dmrg + (mu_0 * filling_dmrg * system_size)
 		# energies_dmrg.append(energy_dmrg_subtracted / system_size)
@@ -957,7 +959,7 @@ def compare_methods_line_plots(U_values, V_values, t=1, precomputed_results=None
 				print(f"  U = {U}, μ₀ = {mu_0}")
 				
 				# Run all methods
-				energy_dmrg, filling_dmrg = run_dmrg_method(U, mu_0, V, t, system_size, chi)
+				energy_dmrg, filling_dmrg, psi_dmrg = run_dmrg_method(U, mu_0, V, t, system_size, chi)
 				energy_dmrg_subtracted = energy_dmrg + (mu_0 * filling_dmrg)
 				
 				energy_twosite = run_twosite(U, mu_0, V, t, system_size)
@@ -1174,7 +1176,7 @@ def compare_methods_heatmap(U_values, V_values, t=1, show_line_plots=False):
 			
 			# 1. DMRG method (reference)
 			print("Running DMRG...")
-			energy_dmrg, filling_dmrg = run_dmrg_method(U, mu_0, V, t, system_size, chi)
+			energy_dmrg, filling_dmrg, psi_dmrg = run_dmrg_method(U, mu_0, V, t, system_size, chi)
 			energy_dmrg_subtracted = energy_dmrg + (mu_0 * filling_dmrg)
 			
 			# 2. Two-site analytical
@@ -1358,6 +1360,23 @@ def compare_methods_heatmap(U_values, V_values, t=1, show_line_plots=False):
 		return fig, line_plot_figures
 	else:
 		return fig
+
+
+
+def get_expectations(physical_params:HamiltonianParams,):
+	"""
+	Want to return the (optionally site-resolved) expectation values
+	for some operators. First I want to do this just for the full DMRG system.
+
+	"""
+	energy_dmrg,filling_dmrg, psi_dmrg= run_dmrg_method(
+		physical_params.U, physical_params.mu_0, physical_params.V, physical_params.t,
+		system_size=100, chi=32
+	)
+	
+	
+	
+	return None
 
 if __name__ == "__main__":
 	print('main')

@@ -11,7 +11,7 @@ from aah_code.clusters import ClusterExperiment
 from aah_code.basis import LocalClusterBasis
 from aah_code.hamiltonian import FullSpectrum, Hubbard1D, SpectrumSolver
 from aah_code.global_params import StatesParams, HamiltonianParams
-from aah_code.real_space_dmrg import get_gnd, get_gnd_infinite
+from aah_code.real_space_dmrg import get_gnd, get_gnd_infinite, run_dmrg_method
 
 
 def run_twosite(U,mu_0,V,t=1,system_size=10):
@@ -72,24 +72,7 @@ def run_cluster_method(U, mu_0, V=0, t=1, system_size=10):
     
     return energy, filling
 
-def run_dmrg_method(U, mu_0, V=0, t=1, system_size=10, chi=32):
-    """
-    Run real-space DMRG calculation
-    
-    Args:
-        U: Hubbard interaction strength
-        mu_0: Chemical potential
-        V: Staggered potential (default 0)
-        t: Hopping parameter (default 1)
-        system_size: Number of lattice sites
-        chi: Bond dimension for DMRG
-    
-    Returns:
-        (energy, filling): Total energy and filling
-    """
-    energy, psi, filling = get_gnd_infinite(chi=chi, U=U, t=t, mu=mu_0, V=V)
-    
-    return energy, filling
+
 
 def compare_half_filling_U_fixed_V(U_values,mu_subtraction:bool=True,V:float=0):
     """
