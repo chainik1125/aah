@@ -409,3 +409,24 @@ class TestHamiltonian:
 				raise AssertionError(f"Energy mismatch for {stacked_test_ks}") from e		
 		
 		return None
+	
+	def test_mismatched_matched_at_zero_U(self):
+		"""
+		We are not applying any approximations to V for small, finite modulation periods,
+		and so the different clustering schemes should agree for all V and t at U=0.
+
+		"""
+		shift=np.pi
+		n=3
+		#start=np.array([[-np.pi/4],[np.pi/4]])
+		
+		starting_kpoints=[
+			np.array([[-np.pi],[-np.pi/2]]),
+			np.array([[-np.pi/4],[np.pi/4]]),
+		]
+
+		starting_kpoints=starting_kpoints + [np.array([[k],[k + np.pi/2]]) for k in np.random.rand(n) * np.pi] 
+
+
+		
+		pass

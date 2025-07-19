@@ -6,7 +6,7 @@ There's a slightly tricky issue of how the Hamiltonian interacts with the cluste
 since you're really defining an interaction cluster rather than a full Hamiltonian cluster.
 """
 import logging
-from aah.aah_code.main import run_dmrg_method
+
 from aah_code.clusters import ClusterExperiment
 from aah_code.basis import LocalClusterBasis
 from aah_code.global_params import StatesParams,HamiltonianParams
@@ -20,6 +20,8 @@ from typing import Union
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import plotly.io as pio
+from tenpy.networks import mps
+from tqdm import tqdm
 
 from aah_code.real_space_dmrg import run_dmrg_method, get_gnd_infinite,get_gnd
 # Set Plotly to use browser renderer to avoid nbformat issues
@@ -57,8 +59,8 @@ class Hubbard1D(CouplingMPOModel, NearestNeighborModel):
 			lat = lattice.Chain(L=L, bc=bc, bc_MPS=bc_MPS, site=self.init_sites(model_params))
 		else:
 			L = model_params.get('L', 4) # size with default
-			bc = 'periodic'  # always use 'open'
-			bc_MPS = 'finite'  # 'infinite' does iDMRG (still use open in 'bc')
+			bc = 'open'  # always use 'open'
+			bc_MPS = 'periodic'  # 'infinite' does iDMRG (still use open in 'bc')
 			lat = lattice.Chain(L=L, bc=bc, bc_MPS=bc_MPS, site=self.init_sites(model_params))
 			raise Warning("No basis class provided - using default chain with period chain bc and finite MPS ")
 		
@@ -116,17 +118,10 @@ class Hubbard1D(CouplingMPOModel, NearestNeighborModel):
 			#Add the onsite alpha U
 			for alpha in range(len(self.lat.unit_cell)):
 				self.add_onsite(U, alpha, 'NuNd')  # Hubbard n_up n_down term
-				
-			# #Add the onsite V
-			# for alpha in range(len(self.lat.unit_cell)):
-			# 	if abs(V) > 0:        # i = 0 … L-1
-			# 		sign =  +V/2 if (alpha % 2 == 0) else -V/2   # even sites +V, odd sites –V
-			# 		self.add_onsite(sign, alpha, 'Nu')       # n↑ part
-			# 		self.add_onsite(sign, alpha, 'Nd')
 
 			if abs(V) > 0:
 				# shape (L_cells,)  →  [+V/2, -V/2, +V/2, …]
-				stagger = np.asarray([ +V/2 if (x % 2 == 0) else -V/2
+				stagger = np.asarray([ +V if (x % 2 == 0) else -V
 									for x in range(L_cells) ])
 				for alpha in range(len(self.lat.unit_cell)):      # usually alpha == 0
 					self.add_onsite(stagger, alpha, 'Nu')         # n↑   term
@@ -227,6 +222,8 @@ class QuickHubbard1D(CouplingMPOModel):
 						cluster_k_points=basis_object.cluster_k_points
 						# Calculate t_tilde for dx=1 within this cluster
 						t_tilde=(1/2)*(1/cluster_size)*np.array([2*t*np.cos(cluster_k_points[j])*(1/2)*2*t*np.cos(1*2*np.pi*j/cluster_size) for j in range(cluster_size)]).sum()
+						print(f"Adding t_tilde={t_tilde} cluster points={cluster_k_points}")
+						
 						#NOTE!IMPORTANT!: here you are only adding once, so you dont need to halve
 						#so to correct you should mutiply t_tilde by 2
 						# Add hopping between the two sites in this cluster: L_start <--> L_start+1
@@ -250,8 +247,8 @@ class QuickHubbard1D(CouplingMPOModel):
 				for alpha in range(len(self.lat.unit_cell)):
 					#NOTE! I think it's V/4 here because I added it as a NNN hopping term
 					#with hermitian conjugates in each so I double count.
-					self.add_coupling(V/4, alpha, 'Cdd', alpha, 'Cd', 2, plus_hc=True)
-					self.add_coupling(V/4, alpha, 'Cdu', alpha, 'Cu', 2, plus_hc=True)
+					self.add_coupling(V, alpha, 'Cdd', alpha, 'Cd', 2, plus_hc=True)
+					self.add_coupling(V, alpha, 'Cdu', alpha, 'Cu', 2, plus_hc=True)
 
 		else:
 			raise ValueError("No basis class provided")
@@ -294,7 +291,7 @@ class SpectrumSolver():
 				n_up=psi_mps.expectation_value('Nu')
 				n_down=psi_mps.expectation_value('Nd')
 				eigvals.append(E_i)
-				eigvecs.append(psi_vec)
+				eigvecs.append(psi_mps)
 				n_ups.append(n_up)
 				n_downs.append(n_down)
 			n_ups=np.stack(n_ups,axis=0)
@@ -306,6 +303,7 @@ class SpectrumSolver():
 
 		else:
 			raise ValueError(f'Solver {self.solver} not implemented yet')
+	
 		
 #Maybe I'll leave this for later
 #class SpectrumContainer():
@@ -377,7 +375,7 @@ class FullSpectrum():
 			spin_spectrum=full_spin_spectrum[i]
 
 			if temperature is None:
-				logger.info('Temperature is None - returning zero temperature expectations')
+				#logger.info('Temperature is None - returning zero temperature expectations')
 				cluster_energy_argmin=np.argmin(energy_spectrum,axis=-1)
 				cluster_energy_expectations.append(energy_spectrum[cluster_energy_argmin])
 				cluster_number_expectations.append(number_spectrum[cluster_energy_argmin])
@@ -388,7 +386,7 @@ class FullSpectrum():
 				spin_polarization = np.sum(ground_state_spins * spin_multiplier[:, np.newaxis], axis=(0,1))  # sum over spins and sites
 				cluster_spin_expectations.append(spin_polarization)
 			else:
-				logger.info(f'Temperature is {temperature} - returning temperature dependent expectations')
+				#logger.info(f'Temperature is {temperature} - returning temperature dependent expectations')
 				beta=1/temperature
 				#TODO:CHECK!! I think you DONT include mu_0 N if you already added this 
 				#term to the Hamiltonian when finding the energies
@@ -514,19 +512,6 @@ def get_spectra(cluster_ks, state_params, physical_params,return_ham:bool=False)
 
 
 
-		
-
-		
-
-		
-
-	return None
-
-	
-
-
-
-
 def test_quick_mismatched(lattice_points,cluster_size,physical_params):
 	#lattice_points=16
 	#cluster_size=2
@@ -625,11 +610,11 @@ def test_hamiltonian_inspection():
 	
 	# Create test parameters
 	state_params = StatesParams(spin_states=2)
-	physical_params = HamiltonianParams(U=2.0, V=0.5, hopping=1.0, mu_0=1.0)
+	physical_params = HamiltonianParams(U=3, V=2, hopping=1, mu_0=0)
 	
 	# Create two test clusters with different k-points
-	cluster_k_1 = np.array([0.0, np.pi])  # k-points for cluster 1
-	cluster_k_2 = np.array([np.pi/2, 3*np.pi/2])  # k-points for cluster 2
+	cluster_k_1 = np.array([0.0, np.pi/2])  # k-points for cluster 1
+	cluster_k_2 = np.array([np.pi, 3*np.pi/2])  # k-points for cluster 2
 	
 	test_basis_1 = LocalClusterBasis(cluster_k_1, state_params)
 	test_basis_2 = LocalClusterBasis(cluster_k_2, state_params)
@@ -897,7 +882,7 @@ def compare_all_methods_vs_U(U_values, V=0, t=1):
 	fig.update_xaxes(title_text="U", row=1, col=1)
 	fig.update_yaxes(title_text="Energy Density", row=1, col=1)
 	fig.update_xaxes(title_text="U", row=1, col=2)
-	fig.update_yaxes(title_text="Filling Density", range=[0,2],row=1, col=2)
+	fig.update_yaxes(title_text="Filling Density", row=1, col=2)
 	
 	return fig
 
@@ -970,8 +955,8 @@ def compare_methods_line_plots(U_values, V_values, t=1, precomputed_results=None
 				filling_cluster_2_normalized = filling_cluster_2 / system_size
 				
 				physical_params = HamiltonianParams(U, V, t, mu_0)
-				system_expectations, _ = test_quick_mismatched(lattice_points, cluster_size, physical_params)
-				total_energy, total_filling, _ = system_expectations
+				system_expectations, cluster_expectations = test_quick_mismatched(lattice_points, cluster_size, physical_params)
+				total_energy, total_filling, total_spin = system_expectations
 				energy_cluster_4_subtracted = (total_energy + physical_params.mu_0 * total_filling) / lattice_points
 				filling_cluster_4_normalized = total_filling / lattice_points
 				
@@ -1111,13 +1096,14 @@ def compare_methods_line_plots(U_values, V_values, t=1, precomputed_results=None
 	
 	return figures
 
-def compare_methods_heatmap(U_values, V_values, t=1, show_line_plots=False):
+def compare_methods_heatmap_mu_fixed(U_values, V_values, mu_fixed=None, t=1, show_line_plots=False):
 	"""
 	Create a heatmap comparing methods with energy relative differences to DMRG (top row) 
 	and filling (bottom row). Columns are reordered as: 2-site cluster (col 1), 4-site (col 2), 2-site analytical (col 3)
 	"""
 	from aah_code.main import run_cluster_method, run_dmrg_method, run_twosite
 	
+		
 	fig = make_subplots(
 		rows=2, cols=3,
 		subplot_titles=[
@@ -1156,7 +1142,7 @@ def compare_methods_heatmap(U_values, V_values, t=1, show_line_plots=False):
 	print(f"V values: {V_values}")
 	print(f"t = {t}")
 	
-	for i, V in enumerate(V_values):
+	for i, V in tqdm(enumerate(V_values)):
 		# Initialize storage for this V (for line plots)
 		if show_line_plots:
 			line_plot_results[V] = {
@@ -1170,8 +1156,13 @@ def compare_methods_heatmap(U_values, V_values, t=1, show_line_plots=False):
 				'fillings_cluster_4site': []
 			}
 		
-		for j, U in enumerate(U_values):
-			mu_0 = U / 2  # Half-filling condition
+		for j, U in tqdm(enumerate(U_values)):
+			if mu_fixed is None:
+				mu_0 = U / 2  # Half-filling condition
+				logger.info(f"Using half-filling condition: μ₀ = U/2, U: {U}, μ₀: {mu_0}")
+			else:
+				mu_0 = mu_fixed
+				logger.info(f"Using fixed chemical potential: μ₀ = {mu_fixed}, U: {U}")
 			print(f"\nComputing U = {U}, V = {V}, μ₀ = {mu_0}")
 			
 			# 1. DMRG method (reference)
@@ -1363,43 +1354,701 @@ def compare_methods_heatmap(U_values, V_values, t=1, show_line_plots=False):
 
 
 
-def get_expectations(physical_params:HamiltonianParams,):
-	"""
-	Want to return the (optionally site-resolved) expectation values
-	for some operators. First I want to do this just for the full DMRG system.
 
+def evaluate_arbitrary_hamiltonian_expectation(psi, new_model_params):
 	"""
+	Evaluate <psi|H_new|psi> where H_new is a different Hamiltonian
+	and psi is an MPS from a previous DMRG calculation.
+	
+	Parameters:
+	-----------
+	psi : MPS
+		The MPS state (e.g., ground state from previous DMRG)
+	new_model_params : dict
+		Parameters for the new Hamiltonian to evaluate
+		
+	Returns:
+	--------
+	float
+		Expectation value <psi|H_new|psi>
+	"""
+	# Create the new Hamiltonian as an MPO
+	new_model = Hubbard1D(new_model_params)
+	H_new_mpo = new_model.H_MPO
+	
+	# Calculate expectation value
+	energy_expectation = H_new_mpo.expectation_value(psi)
+	
+	return energy_expectation
+
+def evaluate_hamiltonian_components(psi, model_params):
+	"""
+	Evaluate individual components of the Hamiltonian separately.
+	
+	Parameters:
+	-----------
+	psi : MPS
+		The MPS state
+	model_params : dict
+		Parameters for the Hamiltonian
+		
+	Returns:
+	--------
+	dict
+		Dictionary with expectation values of different terms
+	"""
+	basis_class = model_params['basis_class']
+	t = model_params.get('t', 0.0)
+	U = model_params.get('U', 0.0)
+	mu_0 = model_params.get('mu', 0.0)
+	V = model_params.get('V', 0.0)
+	
+	results = {}
+	
+	# 1. Kinetic energy (t_tilde terms)
+	if abs(t) > 0:
+		kinetic_params = model_params.copy()
+		kinetic_params.update({'U': 0, 'mu': 0, 'V': 0})  # Only kinetic terms
+		kinetic_model = Hubbard1D(kinetic_params)
+		results['kinetic'] = kinetic_model.H_MPO.expectation_value(psi)
+	
+	# 2. Interaction energy (U terms)
+	if abs(U) > 0:
+		interaction_params = model_params.copy()
+		interaction_params.update({'t': 0, 'mu': 0, 'V': 0})  # Only interaction
+		interaction_model = Hubbard1D(interaction_params)
+		results['interaction'] = interaction_model.H_MPO.expectation_value(psi)
+	
+	# 3. Chemical potential energy
+	if abs(mu_0) > 0:
+		mu_params = model_params.copy()
+		mu_params.update({'t': 0, 'U': 0, 'V': 0})  # Only chemical potential
+		mu_model = Hubbard1D(mu_params)
+		results['chemical_potential'] = mu_model.H_MPO.expectation_value(psi)
+	
+	# 4. Staggered potential (V terms)
+	if abs(V) > 0:
+		v_params = model_params.copy()
+		v_params.update({'t': 0, 'U': 0, 'mu': 0})  # Only staggered potential
+		v_model = Hubbard1D(v_params)
+		results['staggered_potential'] = v_model.H_MPO.expectation_value(psi)
+	
+	# 5. Total energy
+	full_model = Hubbard1D(model_params)
+	results['total'] = full_model.H_MPO.expectation_value(psi)
+	
+	return results
+
+def compare_hamiltonians(basis_class, original_params, new_params_list):
+	"""
+	Compare expectation values of different Hamiltonians with the same ground state.
+	
+	Parameters:
+	-----------
+	basis_class : LocalClusterBasis
+		The basis class defining the cluster
+	original_params : dict
+		Parameters for the original Hamiltonian (to get ground state)
+	new_params_list : list of dict
+		List of parameter dictionaries for new Hamiltonians to evaluate
+		
+	Returns:
+	--------
+	dict
+		Results for each new Hamiltonian
+	"""
+	# Get ground state from original Hamiltonian
+	original_params['basis_class'] = basis_class
+	psi_original = get_gnd(original_params)
+	
+	# Get original energy for reference
+	original_model = Hubbard1D(original_params)
+	E_original = original_model.H_MPO.expectation_value(psi_original)
+	
+	results = {'original_energy': E_original}
+	
+	# Evaluate expectation of new Hamiltonians
+	for i, new_params in enumerate(new_params_list):
+		new_params['basis_class'] = basis_class
+		E_new = evaluate_arbitrary_hamiltonian_expectation(psi_original, new_params)
+		results[f'hamiltonian_{i}'] = E_new
+		
+		print(f"Original ground state energy: {E_original:.6f}")
+		print(f"Expectation with Hamiltonian {i}: {E_new:.6f}")
+		print(f"Energy difference: {E_new - E_original:.6f}")
+		print("-" * 50)
+	
+	return results
+
+def evaluate_custom_operator(psi, basis_class, operator_terms):
+	"""
+	Evaluate expectation value of a completely custom operator.
+	
+	Note: This is a simplified version that works with basic operators.
+	For more complex operators, you may need to build MPOs manually.
+	
+	Parameters:
+	-----------
+	psi : MPS
+		The MPS state
+	basis_class : LocalClusterBasis
+		The basis class defining the cluster
+	operator_terms : list of tuples
+		Each tuple is (coefficient, [(op_name, site), (op_name, site), ...])
+		For simple operators like: [(1.0, [('Nu', 0)]), (2.0, [('Nd', 1)])]
+		
+	Returns:
+	--------
+	float
+		Expectation value of the custom operator (for simple operators only)
+	"""
+	total_expectation = 0.0
+	
+	for coefficient, ops_and_sites in operator_terms:
+		if len(ops_and_sites) == 1:
+			# Single-site operator
+			op_name, site = ops_and_sites[0]
+			expectation = psi.expectation_value(op_name, sites=[site])[0]
+			total_expectation += coefficient * expectation
+		elif len(ops_and_sites) == 2:
+			# Two-site operator - use correlation function
+			op1_name, site1 = ops_and_sites[0]
+			op2_name, site2 = ops_and_sites[1]
+			if site1 == site2:
+				# Same site - use expectation_value_term
+				expectation = psi.expectation_value_term([(op1_name, site1), (op2_name, site2)])
+			else:
+				# Different sites - use correlation_function
+				corr_matrix = psi.correlation_function(op1_name, op2_name, sites1=[site1], sites2=[site2])
+				expectation = corr_matrix[0, 0]
+			total_expectation += coefficient * expectation
+		else:
+			# Multi-site operator - use expectation_value_term
+			term = [(op_name, site) for op_name, site in ops_and_sites]
+			expectation = psi.expectation_value_term(term)
+			total_expectation += coefficient * expectation
+	
+	return total_expectation
+
+# Example usage functions
+def example_usage():
+	"""
+	Example of how to use the arbitrary operator evaluation functions.
+	"""
+	# Assume you have a basis_class and original parameters
+	# basis_class = LocalClusterBasis(...)  # your basis
+	# original_params = {'t': 1.0, 'U': 2.0, 'mu': 0.5, 'V': 0.0}
+	
+	# Example 1: Compare different U values
+	# new_u_values = [{'t': 1.0, 'U': 0.0, 'mu': 0.5, 'V': 0.0},
+	#                 {'t': 1.0, 'U': 4.0, 'mu': 0.5, 'V': 0.0}]
+	# results = compare_hamiltonians(basis_class, original_params, new_u_values)
+	
+	# Example 2: Evaluate components separately
+	# original_params['basis_class'] = basis_class
+	# psi = get_gnd(original_params)
+	# components = evaluate_hamiltonian_components(psi, original_params)
+	# print("Energy components:", components)
+	
+	# Example 3: Custom operator (e.g., spin-spin correlation at distance 2)
+	# custom_terms = [(1.0, [('Sz', 0), ('Sz', 2)]),  # S_z(0) * S_z(2)
+	#                 (0.5, [('Nu', 1)])]              # 0.5 * n_up(1)
+	# custom_expectation = evaluate_custom_operator(psi, basis_class, custom_terms)
+	# print(f"Custom operator expectation: {custom_expectation}")
+	
+	pass
+
+def get_dmrg_expectations(physical_params: HamiltonianParams):
+	"""
+	Calculate expectation values for various operators using DMRG.
+	
+	Parameters:
+	-----------
+	physical_params : HamiltonianParams
+		Parameters for the Hamiltonian (U, V, hopping, mu_0)
+		
+	Returns:
+	--------
+	dict
+		Dictionary with expectation values for particle numbers, spin, hopping energy,
+		interaction energy, and V energy.
+	"""
+	
+	# Run DMRG method to get ground state and expectations
+
+
 	energy_dmrg,filling_dmrg, psi_dmrg= run_dmrg_method(
-		physical_params.U, physical_params.mu_0, physical_params.V, physical_params.t,
+		physical_params.U, physical_params.mu_0, physical_params.V, physical_params.hopping,
 		system_size=100, chi=32
 	)
+	#NOTE: i needs to match the period of V in the iDMRG calculation because operator are periodic in V period	
+	spin_up_dmrg=np.array([psi_dmrg.expectation_value('Nu', i) for i in range(2)])
+	spin_down_dmrg=np.array([psi_dmrg.expectation_value('Nd', i) for i in range(2)])
+	particle_numbers_dmrg=spin_up_dmrg+spin_down_dmrg
+	spin_dmrg=spin_up_dmrg-spin_down_dmrg
+	interaction_energy_dmrg=physical_params.U*np.array([psi_dmrg.expectation_value('NuNd', i) for i in range(2)])
+	v_energy_dmrg=physical_params.V*particle_numbers_dmrg*np.array([[1],[-1]])
+	#Note that a correlation function is <O_1O_2>, which is the same form as the expectation of the hopping
+	#so you can use that as a hack here.
+	# Spin up: <Cd_up(i) * C_up(i+1)>
+	hop_up_forward=psi_dmrg.correlation_function('Cdu','Cu',sites1=[0],sites2=[1])[0,0]
+	hop_up_back=psi_dmrg.correlation_function('Cdu','Cu',sites1=[1],sites2=[0])[0,0]
+	#Spin down: <Cd_down(i) * C_down(i+1)>
+	hop_down_forward=psi_dmrg.correlation_function('Cdd','Cd',sites1=[0],sites2=[1])[0,0]
+	hop_down_back=psi_dmrg.correlation_function('Cdd','Cd',sites1=[1],sites2=[0])[0,0]
+	#Total hopping energy
+	#Just to match the shape of the other objects...
+	hopping_energy_dmrg=2*physical_params.hopping*np.array([[hop_up_forward+hop_up_back],[hop_down_forward+hop_down_back]])
+
+
+
 	
-	
+
+	dmrg_expectations = {
+		'particle_numbers':particle_numbers_dmrg,
+		'spin':spin_dmrg,
+		'hopping_energy': hopping_energy_dmrg, 
+		'interaction_energy': interaction_energy_dmrg,
+		'v_energy': v_energy_dmrg
+	}
+
+	return dmrg_expectations
+
+#TODO: move into the mismatched class
+def get_thermodynamics_expectations_mismatched(energy_eigvals,energy_eigvecs,sites,operator_str:str,temperature:Union[float,None]=None):
+	if temperature is None:
+		#You already converted to mps you magnificent beast
+		psi_mps=energy_eigvecs[0]
+		#n_up=psi_mps.expectation_value('Nu')
+		#n_down=psi_mps.expectation_value('Nd')
+		operator_expectation=psi_mps.expectation_value(operator_str)
+		
+		return operator_expectation		
+		
+	else:
+		#return thermodynamic averages
+		raise ValueError("Thermodynamic averages not implemented for mismatched clusters yet.")
+
+		pass
 	
 	return None
+
+
+def get_V_exp(psi_mps, test_basis_1, test_basis_2, physical_params, total_cluster_size, cluster_k):
+	"""
+	Get site-resolved V expectation values from a V-only Hamiltonian.
+	
+	Parameters:
+	-----------
+	psi_mps : MPS
+		The MPS state (ground state from spectrum solver)
+	test_basis_1 : LocalClusterBasis
+		First cluster basis
+	test_basis_2 : LocalClusterBasis  
+		Second cluster basis
+	physical_params : HamiltonianParams
+		Physical parameters containing V value
+	total_cluster_size : int
+		Total size of the cluster system
+	cluster_k : np.ndarray
+		The k-point cluster array
+		
+	Returns:
+	--------
+	dict
+		Dictionary containing:
+		- 'site_resolved': np.ndarray of V energy per site/bond
+		- 'total': float, total V energy (for verification)
+		- 'method': str, describing the calculation method
+	"""
+	
+	# Create V-only Hamiltonian
+	v_dict = {
+		'basis_classes': [test_basis_1, test_basis_2],
+		'L': total_cluster_size,
+		'L_cluster': cluster_k.shape[0],
+		'V': physical_params.V,
+		't': 0,
+		'U': 0,
+		'mu': 0,
+	}
+	v_model = QuickHubbard1D(v_dict)
+	
+	# Method 1: Get site-resolved V energy from bond contributions
+	# Since V is implemented as NNN coupling (dx=2) with coefficient V/4
+	L = len(psi_mps.sites)
+	v_bond_resolved = []
+	
+	for i in range(L):
+		j = (i + 2) % L  # Next-nearest neighbor with periodic BC
+		
+		# V coupling terms for this bond
+		hop_up = psi_mps.correlation_function('Cdu', 'Cu', sites1=[i], sites2=[j])[0,0]
+		hop_down = psi_mps.correlation_function('Cdd', 'Cd', sites1=[i], sites2=[j])[0,0]
+		hop_up_hc = psi_mps.correlation_function('Cu', 'Cdu', sites1=[i], sites2=[j])[0,0]
+		hop_down_hc = psi_mps.correlation_function('Cd', 'Cdd', sites1=[i], sites2=[j])[0,0]
+		
+		# V energy contribution from this bond (using your V/4 coefficient)
+		bond_v_energy = (physical_params.V/4) * (hop_up + hop_down + hop_up_hc + hop_down_hc)
+		v_bond_resolved.append(bond_v_energy)
+	
+	v_bond_resolved = np.array(v_bond_resolved)
+	
+	# Method 2: Alternative - conceptual staggered potential form
+	# Get particle numbers for comparison
+	n_up_sites = psi_mps.expectation_value('Nu')
+	n_down_sites = psi_mps.expectation_value('Nd')
+	n_total_sites = n_up_sites + n_down_sites
+	
+	# V as staggered potential: +V/2 on even sites, -V/2 on odd sites
+	v_staggered_pattern = np.array([+physical_params.V/2 if (i % 2 == 0) else -physical_params.V/2 
+								   for i in range(L)])
+	v_staggered_resolved = v_staggered_pattern * n_total_sites
+	
+	# Get total V energy for verification
+	v_total_mpo = v_model.H_MPO.expectation_value(psi_mps)
+	
+	# Return results
+	results = {
+		'bond_resolved': v_bond_resolved,
+		'staggered_resolved': v_staggered_resolved,  
+		'total_mpo': v_total_mpo,
+		'total_bond_sum': np.sum(v_bond_resolved),
+		'total_staggered_sum': np.sum(v_staggered_resolved),
+		'particle_numbers': n_total_sites,
+		'method': 'NNN coupling (bond) + staggered potential (conceptual)'
+	}
+	
+	return results
+
+def get_mismatched_cluster_expectations(physical_params: HamiltonianParams, lattice_points: int):
+	"""
+	The equivalent of get_dmrg_expectations but for the mismatched cluster method.
+	In this case, we can probably try to return over all lattice points so output is
+	[L//4,2,2,1] (L//4 lattice points, 2 sub-cluster indices, 2 within cluster indices, 1 dimensional k point).
+	and then you can return the averaged values too. 
+	"""
+	number_expectations=[]
+	spin_expectations=[]
+	hopping_expectations=[]
+	interaction_expectations=[]
+	v_expectations=[]
+
+	
+	state_params=StatesParams(spin_states=2)
+	cluster_size=2
+	int_lattice_object=ClusterExperiment(cluster_size,lattice_points,lattice_points//4)
+	mismatched_object=MismatchedQuick(int_lattice_object,physical_params,lattice_points//2)
+
+	cluster_ks,cluster_idxs=mismatched_object.recluster()
+	
+	
+	
+	
+	n_tots=[]
+	spins=[]
+	U_terms=[]
+	v_terms=[]
+	t_terms=[]
+	energies=[]
+	
+	for cluster_k in cluster_ks:
+		total_cluster_size=cluster_k.shape[0]*cluster_k.shape[1]
+		test_basis_1=LocalClusterBasis(cluster_k[0],state_params)
+		test_basis_2=LocalClusterBasis(cluster_k[1],state_params)
+		basic_dict={'basis_classes':[test_basis_1,test_basis_2],
+					'L':total_cluster_size,
+					'L_cluster':cluster_k.shape[0],
+					'V':physical_params.V,
+					't':physical_params.hopping,
+					'U':physical_params.U,
+					'mu':physical_params.mu_0,
+					}
+		test_ham=QuickHubbard1D(basic_dict)
+		
+		
+		solver=SpectrumSolver(test_ham,None)#basis object never explicitly used anyway
+		eigvals,eigvecs,_,_,_=solver.solve_spectrum()
+		sites=test_ham.lat.mps_sites()
+		#get_expectation_values:
+		n_up = get_thermodynamics_expectations_mismatched(eigvals,eigvecs,sites,'Nu',temperature=None)
+		n_down = get_thermodynamics_expectations_mismatched(eigvals,eigvecs,sites,'Nd',temperature=None)
+		Uterm= physical_params.U*get_thermodynamics_expectations_mismatched(eigvals,eigvecs,sites,'NuNd',temperature=None)
+
+		v_dict={'basis_classes':[test_basis_1,test_basis_2],
+					'L':total_cluster_size,
+					'L_cluster':cluster_k.shape[0],
+					'V':physical_params.V,
+					't':0,
+					'U':0,
+					'mu':0,
+					}
+		v_model=QuickHubbard1D(v_dict)
+		v_exp=v_model.H_MPO.expectation_value(eigvecs[0])
+		v_exp=np.ones((total_cluster_size))*(v_exp/total_cluster_size)
+		#logger.warning("V was implemented without site resolution, need to do this properly later, no T>0 implementation")
+		#hopping
+		t_dict={'basis_classes':[test_basis_1,test_basis_2],
+			'L':total_cluster_size,
+			'L_cluster':cluster_k.shape[0],
+			'V':0,
+			't':physical_params.hopping,
+			'U':0,
+			'mu':0,
+			}
+		t_model=QuickHubbard1D(t_dict)
+		t_exp=t_model.H_MPO.expectation_value(eigvecs[0])
+		t_exp=np.ones((total_cluster_size))*(t_exp/total_cluster_size)
+		
+
+
+		n_tots.append(n_up+n_down)
+		spins.append(n_up-n_down)
+		v_terms.append(v_exp)
+		t_terms.append(t_exp)
+		U_terms.append(Uterm)
+		energies.append(np.ones((total_cluster_size))*(eigvals[0]/total_cluster_size))
+
+	n_tots=np.stack(n_tots,axis=0)
+	spins=np.stack(spins,axis=0)
+	U_terms=np.stack(U_terms,axis=0)
+	v_terms=np.stack(v_terms,axis=0)
+	t_terms=np.stack(t_terms,axis=0)
+	energies=np.stack(energies,axis=0)
+
+	mismatched_expectations = {
+		'particle_numbers':n_tots,
+		'spin':spins,
+		'hopping_energy': t_terms,#energies-U_terms-v_terms+n_tots*physical_params.mu_0, 
+		'interaction_energy': U_terms,
+		'v_energy': v_terms,
+		'total_energy':energies
+	}
+
+	return mismatched_expectations
+
+		
+
+
+
+def get_expectations(physical_params:HamiltonianParams):
+	"""
+	Want to return the (optionally site-resolved) expectation values
+	for some operators. 
+	Do this for all three methods: iDMRG, two-site cluster, and four-site cluster.
+	The things I want to compare are:
+
+	1. Site number bias
+	2. Site spin expectation
+	3. Site coupling expectation
+	4. Site interaction energy expectation
+	5. Site V expectation. 
+
+	"""
+	
+	mismatched_cluster_dict=get_mismatched_cluster_expectations(physical_params, lattice_points=100)
+	dmrg_dict=get_dmrg_expectations(physical_params)
+
+	return dmrg_dict, mismatched_cluster_dict
+
+
+def expectations_plot(physical_params: HamiltonianParams):
+	
+	dmrg_dict,mismatched_cluster_dict=get_expectations(physical_params)
+
+
+	fig=make_subplots(rows=2,cols=5)
+
+	observables=['particle_numbers','spin','interaction_energy','v_energy','hopping_energy']
+	
+	print(f'dmrg shape: {dmrg_dict["particle_numbers"].shape}')
+	print(f'mismatched shape: {mismatched_cluster_dict["particle_numbers"].shape}')
+	
+
+	for i,observable in enumerate(observables):
+		fig.add_trace(go.Scatter(
+			x=np.arange(dmrg_dict[observable].size),
+			y=dmrg_dict[observable].flatten(),
+			mode='lines+markers',
+			name=f'DMRG {observable}',
+			line=dict(color='blue', width=2),
+			marker=dict(size=8)
+		), row=1, col=i+1)
+
+		fig.add_trace(go.Scatter(
+			x=np.arange(mismatched_cluster_dict[observable].size),
+			y=mismatched_cluster_dict[observable].flatten(),
+			mode='lines+markers',
+			name=f'Mismatched {observable}',
+			line=dict(color='red', width=2),
+			marker=dict(size=8)
+		), row=2, col=i+1)
+	fig.update_layout(
+		title=f'Expectation Values Comparison (U={physical_params.U}, V={physical_params.V}, t={physical_params.hopping}, mu_0={physical_params.mu_0})',
+		xaxis_title='Site Index',
+		yaxis_title='Expectation Value',
+	)
+
+
+	fig2=make_subplots(rows=1,cols=1)
+
+
+
+	return fig,fig2
+
+def expectations_plot_combined(physical_params: HamiltonianParams):
+	
+	dmrg_dict, mismatched_cluster_dict = get_expectations(physical_params)
+
+	# Create subplots: original plots + stacked bar chart
+	fig = make_subplots(
+		rows=3, cols=5,
+		subplot_titles=['DMRG Results', '', '', '', '',
+					   'Mismatched Cluster Results', '', '', '', '',
+					   'Energy Components Comparison', '', '', '', ''],
+		specs=[[{}, {}, {}, {}, {}],
+			   [{}, {}, {}, {}, {}],
+			   [{"colspan": 5}, None, None, None, None]]
+	)
+
+	observables = ['particle_numbers', 'spin', 'interaction_energy', 'v_energy', 'hopping_energy']
+
+	
+	
+	print(f'dmrg shape: {dmrg_dict["particle_numbers"].shape}')
+	print(f'mismatched shape: {mismatched_cluster_dict["particle_numbers"].shape}')
+	
+	# Original scatter plots
+	for i, observable in enumerate(observables):
+		fig.add_trace(go.Scatter(
+			x=np.arange(dmrg_dict[observable].size),
+			y=dmrg_dict[observable].flatten(),
+			mode='lines+markers',
+			name=f'DMRG {observable}',
+			line=dict(color='blue', width=2),
+			marker=dict(size=8),
+			showlegend=False
+		), row=1, col=i+1)
+
+		fig.add_trace(go.Scatter(
+			x=np.arange(mismatched_cluster_dict[observable].size),
+			y=mismatched_cluster_dict[observable].flatten(),
+			mode='lines+markers',
+			name=f'Mismatched {observable}',
+			line=dict(color='red', width=2),
+			marker=dict(size=8),
+			showlegend=False
+		), row=2, col=i+1)
+
+	# Stacked bar chart for energy components
+	energy_components = ['hopping_energy', 'v_energy', 'interaction_energy']
+	
+	# Calculate total energies for each method
+	dmrg_totals = {}
+	mismatched_totals = {}
+	
+	for component in energy_components:
+		dmrg_totals[component] = np.sum(dmrg_dict[component])
+		mismatched_totals[component] = np.sum(mismatched_cluster_dict[component])
+	
+	print(f'mismatched components: {np.array(mismatched_totals.values()).sum()},total energy: {mismatched_totals['total_energy'].sum()}')
+	exit()
+
+	methods = ['DMRG', 'Mismatched Cluster']
+	colors = {'hopping_energy': 'lightblue', 'v_energy': 'lightgreen', 'interaction_energy': 'lightcoral'}
+	
+	# Add stacked bars
+	for component in energy_components:
+		values = [dmrg_totals[component]/2, mismatched_totals[component]/100]
+		
+		fig.add_trace(go.Bar(
+			x=methods,
+			y=values,
+			name=component.replace('_', ' ').title(),
+			marker_color=colors[component],
+			showlegend=True
+		), row=3, col=1)
+	
+	# Update layout
+	fig.update_layout(
+		title='Expectation Values Comparison: DMRG vs Mismatched Cluster',
+		barmode='stack',
+		#height=900  # Increase height for 3 rows
+	)
+	
+	# Update axes for energy comparison
+	fig.update_xaxes(title_text="Method", row=3, col=1)
+	fig.update_yaxes(title_text="Total Energy", row=3, col=1)
+
+	return fig
+		
+
+
 
 if __name__ == "__main__":
 	print('main')
 
 	# Test Hamiltonian inspection
-	#test_hamiltonian_inspection()
+	test_hamiltonian_inspection()
+	exit()
+	
+	
 	
 	#exit('Inspected Hamiltonian - check that coupling is correct')
 	
-	#lattice_points=16
-	#cluster_size=2
-	#test_quick_mismatched(lattice_points,cluster_size)
-	U_values=np.linspace(1e-6,5,5)
-	V_values=np.linspace(0,5,5)
+	# lattice_points=16
+	# cluster_size=2
+	# test_quick_mismatched(lattice_points,cluster_size,physical_params=HamiltonianParams(U=1.0,V=1.0,hopping=1.0,mu_0=0.5))
+	# exit('Tested quick mismatched')
 
-	fig,line_figs=compare_methods_heatmap(U_values,V_values,show_line_plots=True)
-	fig.show()
+	#compare the different methods
+	U_values=np.linspace(1e-6,1,1)
+	V_values=np.linspace(0,10,3)
+
+	fig,line_figs=compare_methods_heatmap_mu_fixed(U_values,V_values,mu_fixed=None,t=0,show_line_plots=True)
+	
+	
 	for line_fig in line_figs:
 		line_fig.show()
+	fig.show()
+	# exit()
 	#fig=quick_spectrum_test_vary_U(U_values,V=0)
 	#fig.show()
 
-	exit()
+	#Test operator expectations
+	
+
+	
+	
+	
+	#fig1,fig2=expectations_plot(HamiltonianParams(U=1.0,V=1.0,hopping=1.0,mu_0=0.5))
+	
+	#fig1.show()
+
+	#fig=expectations_plot_combined(HamiltonianParams(U=1.0,V=1.0,hopping=1.0,mu_0=0.5))
+	#fig.show()
+	
+
+	exit('testing expectations')
+	fig=make_subplots(rows=1,cols=1)
+	fig.add_trace(
+		go.Scatter(
+			x=np.arange(len(system_expectations)),
+			y=system_expectations.squeeze(-1),
+			mode='lines+markers',
+			name='Expectation Values',
+			line=dict(color='blue', width=2),
+			marker=dict(size=8)
+		)
+	)
+	fig.update_layout(
+		title='Expectation Values of number operators',
+		xaxis_title='Site',
+		yaxis_title='Expectation Value',
+	)
+	fig.show()
+
+	exit("Testing operator expectations")
 	compare_all_methods_vs_U(U_values,V=5,t=1).show()
 	#fig.write_html("quick_spectrum_test.html")
 	#print("Quick spectrum test saved as 'quick_spectrum_test.html'")
@@ -1410,7 +2059,7 @@ if __name__ == "__main__":
 	V_test = np.linspace(0, 2, 3)  # Small test range
 	
 	try:
-		fig_heatmap = compare_methods_heatmap(U_test, V_test, t=1)
+		fig_heatmap = compare_methods_heatmap_mu_fixed(U_test, V_test, t=1)
 		fig_heatmap.write_html("method_comparison_heatmap.html")
 		print("Heatmap function test successful! Saved as 'method_comparison_heatmap.html'")
 	except Exception as e:
@@ -1432,18 +2081,20 @@ if __name__ == "__main__":
 	print(f'system energy: {system_expectations[0]},system number: {system_expectations[1]},system_spins: {system_expectations[2]}')
 
 
-	
 
 
-	
-	
 
-	
 
-	
 
-	
-		  
+
+
+
+
+
+
+
+
+
 
 
 

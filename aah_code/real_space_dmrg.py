@@ -46,8 +46,8 @@ class RealSpaceHubbard1D(CouplingMPOModel, NearestNeighborModel):
 		V=model_params.get('V', 0.0)
 		# nearest neighbor hopping -t
 		for u1, u2, dx in self.lat.pairs['nearest_neighbors']:
-			self.add_coupling(-t, u1, 'Cdd', u2, 'Cd', dx, plus_hc=True)  # Cdagger_down C_down + h.c.
-			self.add_coupling(-t, u1, 'Cdu', u2, 'Cu', dx, plus_hc=True)  # Cdagger_up C_up + h.c.
+			self.add_coupling(t, u1, 'Cdd', u2, 'Cd', dx, plus_hc=True)  # Cdagger_down C_down + h.c.
+			self.add_coupling(t, u1, 'Cdu', u2, 'Cu', dx, plus_hc=True)  # Cdagger_up C_up + h.c.
 		
 		# Onsite terms
 		for v in range(len(self.lat.unit_cell)):
@@ -58,7 +58,7 @@ class RealSpaceHubbard1D(CouplingMPOModel, NearestNeighborModel):
 		L_cells=self.lat.Ls[0]
 		if abs(V) > 0:
 			# shape (L_cells,)  →  [+V/2, -V/2, +V/2, …]
-			stagger = np.asarray([ +V/2 if (x % 2 == 0) else -V/2
+			stagger = np.asarray([ +V if (x % 2 == 0) else -V
 								for x in range(L_cells) ])
 			for alpha in range(len(self.lat.unit_cell)):      # usually alpha == 0
 				self.add_onsite(stagger, alpha, 'Nu')         # n↑   term
@@ -127,6 +127,25 @@ def get_gnd_infinite(chi, U=1, t=1, mu=0,V=0):
 	filling = N_up + N_down
 	
 	return E, psi, filling
+
+def run_dmrg_method(U, mu_0, V=0, t=1, system_size=10, chi=32):
+    """
+    Run real-space DMRG calculation
+    
+    Args:
+        U: Hubbard interaction strength
+        mu_0: Chemical potential
+        V: Staggered potential (default 0)
+        t: Hopping parameter (default 1)
+        system_size: Number of lattice sites
+        chi: Bond dimension for DMRG
+    
+    Returns:
+        (energy, filling): Total energy and filling
+    """
+    energy, psi, filling = get_gnd_infinite(chi=chi, U=U, t=t, mu=mu_0, V=V)
+    
+    return energy, filling, psi
 		
 
 if __name__ == "__main__":
