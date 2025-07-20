@@ -3,7 +3,7 @@ import numpy as np
 from aah_code.clusters import ClusterExperiment
 from aah_code.basis import LocalClusterBasis
 from aah_code.hamiltonian import Hubbard1D, FullSpectrum, inspect_hamiltonian_terms
-from aah_code.hamiltonian import QuickHubbard1D, get_spectra
+from aah_code.hamiltonian import QuickHubbard1D, get_spectra, MismatchedQuick
 from aah_code.global_params import StatesParams, HamiltonianParams
 
 
@@ -690,7 +690,6 @@ class TestHamiltonian:
 		V = 2
 		mu = 0
 		
-		
 		# Test with a simple 2-site cluster
 		cluster_k_points = np.array([[-np.pi], [0]])
 		test_basis = LocalClusterBasis(cluster_k_points, state_params)
@@ -704,9 +703,7 @@ class TestHamiltonian:
 		}
 		full_ham_matched = Hubbard1D(ham_dict_matched)
 
-		def get_single_particle_spectrum_matched(mismatched_cluster_k):
-			reshaped=
-			return None
+		
 		#Test QuickHubbard1D
 		cluster_k_points=np.array([[-np.pi], [-np.pi/2]])
 		cluster_k_points=np.stack([cluster_k_points,cluster_k_points+np.pi],axis=0)
@@ -745,103 +742,168 @@ class TestHamiltonian:
 		log.debug(f'eigenvals: {mismatched_evals}')
 
 		return None
+	
+
+	def test_full_single_particle(self):
+		"""Test the extract_single_particle_hamiltonian function."""
+
+		#Initial definitions
+		state_params = StatesParams(spin_states=2)
+		lattice_points=40
+		cluster_size=2
+		#physical params
+		t = 1.0
+		U = 0
+		V = 2
+		mu = 0
+		physical_params=HamiltonianParams(U,V,t,mu)
+
 		
-		# Get the full Hamiltonian matrix to debug
-		full_matrix = tp.algorithms.exact_diag.get_numpy_Hamiltonian(full_ham)
-		print(f"Full Hamiltonian shape: {full_matrix.shape}")
+		#function for making and then extracting the single particle hamiltonian of matched case
+		def get_single_matched():
+			#TODO: This should all be one function - namely the one you use in your loops!
+			matched_lattice_object=ClusterExperiment(cluster_size,lattice_points,lattice_points//2)
+			matched_ks=matched_lattice_object.generate_clusters()
+			single_particle_hams=[]
+			eigvals=[]
+			log.debug(f'matched k shape: {matched_ks.shape}')
+			d = lattice_points//4
+			N = matched_ks.shape[0]
+			if N < d + 1:
+				raise ValueError("Need at least d+1 slices to form one pair")
+			n_pairs = N - d           # here: 4 − 2 = 2
+			first  = matched_ks[:n_pairs]        # A[0], A[1]    → shape (2,2,1)
+			second = matched_ks[d:d + n_pairs]   # A[2], A[3]    → shape (2,2,1)
+			matched_clusters = np.stack((first, second), axis=1)
+
+			for matched_cluster in matched_clusters:
+				cluster_eigvals=[]
+				cluster_hams=[]
+				for k in matched_cluster:
+					test_basis=LocalClusterBasis(k,state_params)
+					ham_dict_matched = {
+						'basis_class': test_basis,
+						'V': V,
+						't': t,
+						'mu': mu,
+						'U': U,
+					}
+					matched_ham=Hubbard1D(ham_dict_matched)
+					single_particle_matched=single_particle_block(matched_ham,spin='up')
+					matched_evals,matched_evecs=np.linalg.eigh(single_particle_matched)
+					cluster_eigvals.append(matched_evals)
+					cluster_hams.append(single_particle_matched)
+			
+				#NOTE! Don't confuse the single particle and the filled spectrum!
+				combined_energy_vals=np.stack([cluster_eigvals[i][j] for i in range(cluster_eigvals[0].shape[0]) for j in range(cluster_eigvals[1].shape[0])],axis=0)
+				combined_energy_vals=np.sort(combined_energy_vals,axis=0)
+
+				eigvals.append(combined_energy_vals)
+				single_particle_hams.append(cluster_hams)
+
+			
+			return np.array(eigvals), single_particle_hams
 		
-		# Extract single-particle Hamiltonian from full Hamiltonian
-		extracted_matrix = extract_single_particle_hamiltonian(full_ham)
-		print(f"Single-particle matrix:\n{extracted_matrix}")
+
+		def get_single_mismatched():
+			mismatched_lattice_object=ClusterExperiment(cluster_size,lattice_points,lattice_points//4)
+			mismatch_obj=MismatchedQuick(mismatched_lattice_object,physical_params,V_k_period=lattice_points//2)
+			mismatched_ks=mismatch_obj.recluster()[0]
+
+			eigvals=[]
+			single_particle_hams=[]
+			for k in mismatched_ks:
+				log.debug(f"matched k (pi units): {k/np.pi}")
+				sub_cluster_1=LocalClusterBasis(k[0],state_params)
+				sub_cluster_2=LocalClusterBasis(k[1],state_params)
+				ham_dict_mismatched={
+					'basis_classes':[sub_cluster_1,sub_cluster_2],
+							'L':k[0].shape[0]*k[1].shape[0],
+							'L_cluster':k[0].shape[0],
+							'V':V,
+							't':t,
+							'U':U,
+							'mu':mu,			
+				}
+
+				mismatched_ham=QuickHubbard1D(ham_dict_mismatched)
+				mismatched_single_particle=single_particle_block(mismatched_ham,spin='up')
+				mismatched_evals,mismatched_evecs=np.linalg.eigh(mismatched_single_particle)
+
+				eigvals.append(mismatched_evals)
+				single_particle_hams.append(mismatched_single_particle)
+			
+
+
+			
+			mismatched_combined_eigvals=np.array(eigvals)
+			return mismatched_combined_eigvals,single_particle_hams
+			
+
 		
-		eigenvals = np.linalg.eigvals(extracted_matrix)
-		print(f"Single-particle eigenvalues: {np.sort(eigenvals.real)}")
+		matched_combined_evals,matched_single_particle_hams=get_single_matched()
 		
-		# For comparison, let's also look at the full spectrum
-		full_eigenvals = np.linalg.eigvals(full_matrix)
-		print(f"Full spectrum: {np.sort(full_eigenvals.real)}")
 		
-		# For the k-blocking 2-site Hubbard model with t=1, V=0, mu=0
-		# The single-particle energies from the many-body spectrum are at ±2
-		# This comes from the specific normalization in the k-blocking formalism
-		# We can verify this is correct by checking the 1-particle states match the full spectrum
-		expected_sp_eigenvals = np.array([-2, -2, 2, 2])
+		mismatched_combined_eigvals,mismatched_single_particle_hams=get_single_mismatched()
+		print(f'eigvals shape: {matched_combined_evals},mismatched eigvals shape: {mismatched_combined_eigvals.shape}')
+		print(f'eigvals matched: {matched_combined_evals}\n eigvals mismatched: {mismatched_combined_eigvals}')
+
+		try:
+			np.testing.assert_array_almost_equal(
+				matched_combined_evals,
+				mismatched_combined_eigvals,
+				err_msg="Clusters didn't match"
+			)
+			log.info(f"✓ Test PASSED for four site single particle")
+		except AssertionError as e:
+			log.error(f"✗ Test FAILED for four site single particle.")
+			raise AssertionError(f"Energy mismatch for four site single particle") from e	
+
 		
-		print(f"Expected single-particle eigenvalues: {expected_sp_eigenvals}")
+		return None
+
+
+		#print(f'mismatched spectrum: {mis_eigvals[0].round(2)}')
 		
-		# The non-interacting many-body eigenvalues should be sums of subsets of single-particle eigenvalues:
-		# 0-particle: 0
-		# 1-particle: -1, -1, 1, 1  
-		# 2-particle: -2, 0, 0, 0, 0, 2
-		# etc.
+		log.debug('matched case hams')
+		for ham in matched_single_particle_hams:
+			
+			labels = [f"|site {i}⟩" for i in range(ham.shape[0])]
+
+			df = matrix_to_dataframe(ham, labels, precision=2)
+			print_matrix(df, style="tabulate", tablefmt="grid")
 		
-		# Let's check if our extraction gives the right single-particle eigenvalues
-		extracted_eigs_sorted = np.sort(eigenvals.real)
-		expected_eigs_sorted = np.sort(expected_sp_eigenvals)
+		log.debug('mismatched case ham')
+		for ham in mismatched_single_particle_hams:
+			
+			labels = [f"|site {i}⟩" for i in range(ham.shape[0])]
+
+			df = matrix_to_dataframe(ham, labels, precision=2)
+			print_matrix(df, style="tabulate", tablefmt="grid")
 		
-		print(f"Extracted eigenvalues (sorted): {extracted_eigs_sorted}")
-		print(f"Expected eigenvalues (sorted): {expected_eigs_sorted}")
+
+		log.debug(f'matched spectrum: {matched_combined_evals.round(2)}')
+		log.debug(f'mismatched spectrum: {mismatched_combined_eigvals.round(2)}')
+
+
 		
-		# They should match within numerical precision
-		np.testing.assert_array_almost_equal(
-			extracted_eigs_sorted,
-			expected_eigs_sorted,
-			decimal=10,
-			err_msg="Single-particle eigenvalues don't match expected values"
-		)
+
+
+			
+
+
+
+		return None
+
+
+
+
 		
-		# Basic verification that our function produces reasonable results
-		# The key insight is that our extracted single-particle eigenvalues {-2, -2, 2, 2}
-		# should appear as a subset of the 1-particle energies in the full spectrum
+
 		
-		full_spectrum_sorted = np.sort(full_eigenvals.real)
-		print(f"Full spectrum analysis:")
-		print(f"  Vacuum (0-particle): {full_spectrum_sorted[5:11]}")  # Should be ~0
-		print(f"  1-particle sector: {np.concatenate([full_spectrum_sorted[1:5], full_spectrum_sorted[11:15]])}")
-		print(f"  2-particle sector: {np.concatenate([full_spectrum_sorted[0:1], full_spectrum_sorted[15:16]])}")
 		
-		# The extracted eigenvalues should correspond to the unique single-particle energies
-		# The fact that we get [-2, -2, 2, 2] while the full spectrum has 8 single-particle states
-		# suggests each extracted eigenvalue corresponds to degenerate states
-		one_particle_sector = np.concatenate([full_spectrum_sorted[1:5], full_spectrum_sorted[11:15]])
-		print(f"1-particle sector energies: {one_particle_sector}")
 		
-		# Debug the unique values more carefully
-		print(f"1-particle sector values with high precision: {one_particle_sector}")
-		print(f"Differences between adjacent values: {np.diff(one_particle_sector)}")
 		
-		# Round to avoid floating point precision issues
-		rounded_1p = np.round(one_particle_sector, 10)
-		unique_1p_energies = np.unique(rounded_1p)
-		print(f"Unique 1-particle energies (rounded): {unique_1p_energies}")
-		print(f"Number of unique 1-particle energies: {len(unique_1p_energies)}")
 		
-		# Our extracted eigenvalues should contain the same unique values
-		unique_extracted = np.unique(np.round(extracted_eigs_sorted, 10))
-		print(f"Unique extracted eigenvalues (rounded): {unique_extracted}")  
-		print(f"Number of unique extracted eigenvalues: {len(unique_extracted)}")
-		
-		# The unique values should match - both should be just [-2, 2]
-		expected_unique = np.array([-2, 2])
-		np.testing.assert_array_almost_equal(
-			np.sort(unique_extracted),
-			expected_unique,
-			decimal=10,
-			err_msg="Unique extracted eigenvalues should be [-2, 2]"
-		)
-		
-		np.testing.assert_array_almost_equal(
-			np.sort(unique_1p_energies), 
-			expected_unique,
-			decimal=10,
-			err_msg="Unique 1-particle energies from full spectrum should be [-2, 2]"
-		)
-		
-		# Additional check: verify that the 1-particle sector contains our extracted eigenvalues
-		for eig in extracted_eigs_sorted:
-			assert np.any(np.isclose(one_particle_sector, eig)), f"Extracted eigenvalue {eig} not found in 1-particle sector"
-		
-		log.info("✓ Single-particle extraction test PASSED")
-		log.info("✓ Many-body spectrum consistency verified")
 
 
