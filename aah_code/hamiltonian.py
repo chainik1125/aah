@@ -456,6 +456,8 @@ class MismatchedQuick():
 			# Convert indices back to actual k-point values
 			k_spacing = 2*np.pi/lattice_points
 			new_k_clusters = new_k_clusters_idxs * k_spacing
+			#shift to match boundary of original
+			new_k_clusters=new_k_clusters-np.pi
 			
 			logger.info(f'shape new_k_clusters:{new_k_clusters.shape}')
 			return new_k_clusters,new_k_clusters_idxs
@@ -476,7 +478,7 @@ def get_spectra(cluster_ks, state_params, physical_params,return_ham:bool=False)
 		total_cluster_size=cluster_k.shape[0]*cluster_k.shape[1]
 		test_basis_1=LocalClusterBasis(cluster_k[0],state_params)
 		test_basis_2=LocalClusterBasis(cluster_k[1],state_params)
-		logger.info(f'total_cluster size: {total_cluster_size}')
+		#logger.info(f'total_cluster size: {total_cluster_size}')
 		
 		test_ham=QuickHubbard1D({'basis_classes':[test_basis_1,test_basis_2],
 					'L':total_cluster_size,
@@ -528,8 +530,8 @@ def test_quick_mismatched(lattice_points,cluster_size,physical_params):
 	print(type(int_lattice_object))
 	test=MismatchedQuick(int_lattice_object,physical_params,lattice_points//2)
 	cluster_ks,cluster_idxs=test.recluster()
-	print(f'cluster ks shape: {cluster_idxs.shape}')
-	print(f'cluster idxs: {cluster_idxs}')
+	#print(f'cluster ks shape: {cluster_idxs.shape}')
+	#print(f'cluster idxs: {cluster_idxs}')
 
 	#k_points,energies,number_spectrum,spin_spectrum=get_spectra(cluster_ks)
 	spectra_4tuple=get_spectra(cluster_ks, state_params, physical_params)
@@ -2009,10 +2011,10 @@ if __name__ == "__main__":
 	# exit('Tested quick mismatched')
 
 	#compare the different methods
-	U_values=np.linspace(1e-6,1,1)
-	V_values=np.linspace(0,1,1)
+	U_values=np.linspace(1e-8,1,1)
+	V_values=np.linspace(0,1,4)
 
-	fig,line_figs=compare_methods_heatmap_mu_fixed(U_values,V_values,mu_fixed=None,t=2,show_line_plots=True)
+	fig,line_figs=compare_methods_heatmap_mu_fixed(U_values,V_values,mu_fixed=None,t=1,show_line_plots=True)
 	
 	
 	for line_fig in line_figs:
