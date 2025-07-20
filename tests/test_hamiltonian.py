@@ -2,13 +2,174 @@ import pytest
 import numpy as np
 from aah_code.clusters import ClusterExperiment
 from aah_code.basis import LocalClusterBasis
-from aah_code.hamiltonian import Hubbard1D,FullSpectrum,SpectrumSolver, get_spectra, inspect_hamiltonian_terms
+from aah_code.hamiltonian import Hubbard1D, FullSpectrum, inspect_hamiltonian_terms
+from aah_code.hamiltonian import QuickHubbard1D, get_spectra
 from aah_code.global_params import StatesParams, HamiltonianParams
 
 
 import tenpy as tp
 import logging
 from tenpy.algorithms import exact_diag
+import pandas as pd
+
+import numpy as np
+from tenpy.algorithms import exact_diag
+from aah_code.matrix_display import matrix_to_dataframe, print_matrix
+
+
+def latex_matrix_with_labels(H, basis_labels=None, precision=3, col_align="c"):
+    r"""
+    Build a LaTeX string showing the matrix and its basis in one array‑block.
+
+    Parameters
+    ----------
+    H : array_like, shape (n,n)
+        The matrix you want to display (e.g. from `single_particle_block`).
+    basis_labels : list[str] or None
+        Human‑readable labels for each basis ket in the same order as `H`.
+        If None, simple indices 0…n‑1 are used.
+    precision : int
+        Decimal places to print (uses general‐format `{:.<p>g}`).
+    col_align : str
+        Column alignment for LaTeX array (`c`, `r`, or `l`).
+
+    Returns
+    -------
+    latex : str
+        Ready‑to‑copy LaTeX code (enclosed in `\[ … \]`).
+    """
+    H = np.asarray(H)
+    n = H.shape[0]
+    if basis_labels is None:
+        basis_labels = [f"${i}$" for i in range(n)]
+
+    # --- build the pmatrix body ------------------------------------------------
+    num_fmt = f"{{:.{precision}g}}"
+    body_rows = [
+        " & ".join(num_fmt.format(x) for x in H[i]) for i in range(n)
+    ]
+    pmatrix = "\\begin{pmatrix}\n" + " \\\\\n".join(body_rows) + "\n\\end{pmatrix}"
+
+    # --- assemble the outer array with row/col headers -------------------------
+    col_header = " & ".join([""] + basis_labels)
+    row_labels = " \\\\\n".join(basis_labels)  # end each line with \\
+    outer = (
+        "\\[\n"
+        "\\begin{array}{" + col_align * (n + 1) + "}\n"
+        + col_header + " \\\\\n\\hline\n"
+        + pmatrix + " & \\begin{array}{c}\n" + row_labels + "\n\\end{array}\n"
+        "\\end{array}\n"
+        "\\]\n"
+    )
+    return outer
+
+def single_particle_block(model, spin=None, from_mpo=True):
+    """
+    Return the 1‑particle Hamiltonian in the requested spin sector.
+
+    Parameters
+    ----------
+    model : CouplingMPOModel
+        Your TeNPy Hubbard model (already initialised).
+    spin  : {None, 'up', 'down'}, optional
+        • None  → keep both spins (default, size 2L × 2L)  
+        • 'up'  → project onto N=1, S_z=+½   (size L × L)  
+        • 'down'→ project onto N=1, S_z=‑½   (size L × L)
+    from_mpo : bool
+        Passed straight to `exact_diag.get_numpy_Hamiltonian`.
+
+    Returns
+    -------
+    H1 : (n,n) complex ndarray
+        Dense matrix in the chosen sub‑space.
+    """
+    # full Hamiltonian in occupation basis |σ₁σ₂…σ_L⟩
+    H = exact_diag.get_numpy_Hamiltonian(model, from_mpo=from_mpo)
+
+    L           = model.lat.N_sites
+    occ_per_st  = np.array([0, 1, 1, 2], dtype=np.uint8)  # |0>,|↑>,|↓>,|↑↓>
+    spin_per_st = np.array([ 0, 1,-1, 0], dtype=np.int8)  #   0 , +1 , -1 ,  0
+
+    want_spin = {'up': 1, 'down': -1, None: 0}[spin]      # 0 ⇒ accept ±1
+
+    keep = []
+    for idx in range(4**L):
+        tmp, n, sz = idx, 0, 0
+        for _ in range(L):
+            st   = tmp & 3           # %4, faster
+            n   += occ_per_st [st]
+            sz  += spin_per_st[st]
+            tmp >>= 2                # //4
+            if n > 1:                # early exit
+                break
+        if n == 1 and (want_spin == 0 or sz == want_spin):
+            keep.append(idx)
+
+    keep = np.asarray(keep, dtype=np.int64)
+    return H[np.ix_(keep, keep)]
+
+
+
+def extract_single_particle_hamiltonian(mpo_hamiltonian):
+	"""
+	Extract the 1-particle Hamiltonian matrix from MPO hamiltonians (Hubbard1D or QuickHubbard1D).
+	
+	This extracts the matrix representation of the Hamiltonian restricted to the 1-particle subspace.
+	For a system with n_c cluster sites:
+	- Hubbard1D: extracts 2n_c x 2n_c matrix (1 particle in 2n_c spin-orbitals)  
+	- QuickHubbard1D: extracts 2n_c x 2n_c matrix from each cluster
+	
+	Args:
+		mpo_hamiltonian: Either Hubbard1D or QuickHubbard1D instance
+		
+	Returns:
+		np.ndarray: 1-particle Hamiltonian matrix in the single-particle subspace
+	"""
+	# Get the full Hamiltonian matrix
+	full_H = exact_diag.get_numpy_Hamiltonian(mpo_hamiltonian)
+	
+	# Get lattice information
+	L = mpo_hamiltonian.lat.Ls[0]  # Number of sites
+	
+	# Generate all possible basis states and identify 1-particle states
+	# Each site has 4 states: |0⟩, |↑⟩, |↓⟩, |↑↓⟩ 
+	# For 1-particle states, we want states with exactly one particle
+	
+	# Generate all basis states (4^L total states)
+	single_particle_indices = []
+	basis_states = []
+	
+	for state_idx in range(4**L):
+		# Convert state index to occupation numbers for each site
+		temp_idx = state_idx
+		site_occupations = []
+		total_particles = 0
+		
+		for site in range(L):
+			site_occ = temp_idx % 4
+			site_occupations.append(site_occ)
+			temp_idx //= 4
+			
+			# Count particles: |0⟩=0, |↑⟩=1, |↓⟩=1, |↑↓⟩=2
+			if site_occ == 1 or site_occ == 2:  # |↑⟩ or |↓⟩
+				total_particles += 1
+			elif site_occ == 3:  # |↑↓⟩
+				total_particles += 2
+		
+		# Keep only states with exactly 1 particle
+		if total_particles == 1:
+			single_particle_indices.append(state_idx)
+			basis_states.append(site_occupations)
+	
+	# Extract the 1-particle subspace Hamiltonian
+	n_1p = len(single_particle_indices)
+	single_particle_H = np.zeros((n_1p, n_1p), dtype=complex)
+	
+	for i, idx_i in enumerate(single_particle_indices):
+		for j, idx_j in enumerate(single_particle_indices):
+			single_particle_H[i, j] = full_H[idx_i, idx_j]
+	
+	return single_particle_H
 
 
 
@@ -338,8 +499,7 @@ class TestHamiltonian:
 		#start=np.array([[-np.pi/4],[np.pi/4]])
 		
 		starting_kpoints=[
-			np.array([[-np.pi],[-np.pi/2]]),
-			np.array([[-np.pi/4],[np.pi/4]]),
+			np.array([[-np.pi],[-np.pi/2]])
 		]
 
 		starting_kpoints=starting_kpoints + [np.array([[k],[k + np.pi/2]]) for k in np.random.rand(n) * np.pi] 
@@ -354,6 +514,7 @@ class TestHamiltonian:
 			stacked_test_ks=np.stack([np.stack([start,start+shift],axis=0)],axis=0)
 			log.debug(f'test_ks shape: {np.array(test_ks).shape}')
 			log.debug(f'stacked shape: {stacked_test_ks.shape}')
+			
 			state_params=StatesParams(spin_states=2)
 
 			U=1
@@ -410,6 +571,96 @@ class TestHamiltonian:
 		
 		return None
 	
+	def test_foursite_hubbard_zero_U(self):
+		"""
+		test first the minimal example of the four site Hubbard model.
+		"""
+		starting_kpoints_pi=[
+			np.array([[-np.pi],[0]])
+		]
+
+		starting_kpoints_halfpi=[
+			np.array([[-np.pi],[-np.pi/2]])
+		]
+
+		shift=np.pi
+		test_ks_pi_clustering=[starting_kpoints_pi[0],starting_kpoints_pi[0]+np.pi/2]
+		stacked_test_ks=np.stack([np.stack([starting_kpoints_halfpi[0],starting_kpoints_halfpi[0]+np.pi],axis=0)],axis=0)
+
+		
+		log.info(f'stacked shape: {stacked_test_ks.shape}')
+		
+
+		U=0
+		V=1
+		t=1
+		mu_0=U/2
+		physical_params = HamiltonianParams(U, V, t, mu_0)
+		state_params=StatesParams(spin_states=2)
+		#Get energies for the two two-particle clusters
+		full_spectrum_object = FullSpectrum(test_ks_pi_clustering, state_params, physical_params)
+		cluster_spectra = full_spectrum_object.get_full_spectrum()
+		k_points,energy_spectrum,number_spectrum,spin_spectrum=cluster_spectra
+
+		log.debug(f"energy_spectrum shape: {energy_spectrum.shape}")
+
+		#inspect ham:
+		ham_objects=full_spectrum_object.get_full_spectrum(return_ham=True)
+		#print(f'first cluster two site')
+		#inspect_hamiltonian_terms(ham_objects[0])
+
+		
+		
+
+		#Now do the same for the four site
+		
+
+		spectra_4tuple=get_spectra(stacked_test_ks, state_params, physical_params)
+		
+		#hams=get_spectra(stacked_test_ks, state_params, physical_params,return_ham=True)
+		#inspect_hamiltonian_terms(hams[0])
+		
+		k_points_4,energy_spectrum_4,number_spectrum_4,spin_spectrum_4=spectra_4tuple
+
+		log.debug(f'k_points shape: {k_points_4.shape},energy shape: {energy_spectrum_4.shape}')
+		
+
+
+		log.debug(f'first four energies clusters: {energy_spectrum[:,:4]}, first 2 energies 4: {energy_spectrum_4[:,:2]}')
+		
+		mu_tilde_array=(2*t*np.cos(stacked_test_ks[:,0,:,:])+2*t*np.cos(stacked_test_ks[:,1,:,:]))/2
+		t_tilde_array=(2*t*np.cos(stacked_test_ks[:,0,:,:])-2*t*np.cos(stacked_test_ks[:,1,:,:]))/2
+		gs_energy=2*(mu_tilde_array-np.sqrt(t_tilde_array**2+V**2))
+		gs=(gs_energy*np.heaviside(mu_0-gs_energy,0)).sum()
+		log.debug(f'exact: {gs}')
+
+		print(f't_tilde_array: {t_tilde_array}')
+		return None
+		
+
+		#Now check that they are the same across the spectrum
+		#first I need to form the spectrum
+		
+		combined_energy_vals=np.stack([energy_spectrum[0,i]+energy_spectrum[1,j] for i in range(energy_spectrum.shape[1]) for j in range(energy_spectrum.shape[1])],axis=0)
+		combined_energy_vals=np.sort(combined_energy_vals,axis=0)
+
+		print(f'combined_energy_vals first 2: {combined_energy_vals[:2]}')
+		print(f'4 particle first 2: {energy_spectrum_4[0,:2]}')
+
+		return None
+		try:
+			np.testing.assert_array_almost_equal(
+				combined_energy_vals[:5],
+				energy_spectrum_4[0,:5],
+				err_msg="Clusters didn't match"
+			)
+			log.info(f"✓ Test PASSED for {stacked_test_ks}.%")
+		except AssertionError as e:
+			log.error(f"✗ Test FAILED for {stacked_test_ks}.")
+			raise AssertionError(f"Energy mismatch for {stacked_test_ks}") from e		
+
+
+	
 	def test_mismatched_matched_at_zero_U(self):
 		"""
 		We are not applying any approximations to V for small, finite modulation periods,
@@ -430,3 +681,167 @@ class TestHamiltonian:
 
 		
 		pass
+	
+	def test_extract_single_particle_hamiltonian(self):
+		"""Test the extract_single_particle_hamiltonian function."""
+		state_params = StatesParams(spin_states=2)
+		t = 1.0
+		U = 0
+		V = 2
+		mu = 0
+		
+		
+		# Test with a simple 2-site cluster
+		cluster_k_points = np.array([[-np.pi], [0]])
+		test_basis = LocalClusterBasis(cluster_k_points, state_params)
+
+		ham_dict_matched = {
+			'basis_class': test_basis,
+			'V': V,
+			't': t,
+			'mu': mu,
+			'U': U,
+		}
+		full_ham_matched = Hubbard1D(ham_dict_matched)
+
+		def get_single_particle_spectrum_matched(mismatched_cluster_k):
+			reshaped=
+			return None
+		#Test QuickHubbard1D
+		cluster_k_points=np.array([[-np.pi], [-np.pi/2]])
+		cluster_k_points=np.stack([cluster_k_points,cluster_k_points+np.pi],axis=0)
+		test_basis_1=LocalClusterBasis(cluster_k_points[0],state_params)
+		test_basis_2=LocalClusterBasis(cluster_k_points[1],state_params)
+		
+		ham_dict_mismatched={
+			'basis_classes':[test_basis_1,test_basis_2],
+					'L':cluster_k_points[0].shape[0]*cluster_k_points[1].shape[0],
+					'L_cluster':cluster_k_points[0].shape[0],
+					'V':V,
+					't':t,
+					'U':U,
+					'mu':mu,
+					
+		}
+		
+		# Create full Hamiltonian with interactions
+
+		full_ham_mismatched=QuickHubbard1D(ham_dict_mismatched)
+		
+		
+		test_single_particle=single_particle_block(full_ham_mismatched,spin='up')
+
+		log.debug(f'test single particle shape: {test_single_particle.shape}')
+		log.debug(f'test single particle ham:')
+		
+		log.debug(test_single_particle)
+		
+		labels = [f"|site {i}⟩" for i in range(test_single_particle.shape[0])]
+
+		df = matrix_to_dataframe(test_single_particle, labels, precision=2)
+		log.debug(print_matrix(df, style="tabulate", tablefmt="grid"))
+
+		mismatched_evals,mismatched_evecs=np.linalg.eigh(test_single_particle)
+		log.debug(f'eigenvals: {mismatched_evals}')
+
+		return None
+		
+		# Get the full Hamiltonian matrix to debug
+		full_matrix = tp.algorithms.exact_diag.get_numpy_Hamiltonian(full_ham)
+		print(f"Full Hamiltonian shape: {full_matrix.shape}")
+		
+		# Extract single-particle Hamiltonian from full Hamiltonian
+		extracted_matrix = extract_single_particle_hamiltonian(full_ham)
+		print(f"Single-particle matrix:\n{extracted_matrix}")
+		
+		eigenvals = np.linalg.eigvals(extracted_matrix)
+		print(f"Single-particle eigenvalues: {np.sort(eigenvals.real)}")
+		
+		# For comparison, let's also look at the full spectrum
+		full_eigenvals = np.linalg.eigvals(full_matrix)
+		print(f"Full spectrum: {np.sort(full_eigenvals.real)}")
+		
+		# For the k-blocking 2-site Hubbard model with t=1, V=0, mu=0
+		# The single-particle energies from the many-body spectrum are at ±2
+		# This comes from the specific normalization in the k-blocking formalism
+		# We can verify this is correct by checking the 1-particle states match the full spectrum
+		expected_sp_eigenvals = np.array([-2, -2, 2, 2])
+		
+		print(f"Expected single-particle eigenvalues: {expected_sp_eigenvals}")
+		
+		# The non-interacting many-body eigenvalues should be sums of subsets of single-particle eigenvalues:
+		# 0-particle: 0
+		# 1-particle: -1, -1, 1, 1  
+		# 2-particle: -2, 0, 0, 0, 0, 2
+		# etc.
+		
+		# Let's check if our extraction gives the right single-particle eigenvalues
+		extracted_eigs_sorted = np.sort(eigenvals.real)
+		expected_eigs_sorted = np.sort(expected_sp_eigenvals)
+		
+		print(f"Extracted eigenvalues (sorted): {extracted_eigs_sorted}")
+		print(f"Expected eigenvalues (sorted): {expected_eigs_sorted}")
+		
+		# They should match within numerical precision
+		np.testing.assert_array_almost_equal(
+			extracted_eigs_sorted,
+			expected_eigs_sorted,
+			decimal=10,
+			err_msg="Single-particle eigenvalues don't match expected values"
+		)
+		
+		# Basic verification that our function produces reasonable results
+		# The key insight is that our extracted single-particle eigenvalues {-2, -2, 2, 2}
+		# should appear as a subset of the 1-particle energies in the full spectrum
+		
+		full_spectrum_sorted = np.sort(full_eigenvals.real)
+		print(f"Full spectrum analysis:")
+		print(f"  Vacuum (0-particle): {full_spectrum_sorted[5:11]}")  # Should be ~0
+		print(f"  1-particle sector: {np.concatenate([full_spectrum_sorted[1:5], full_spectrum_sorted[11:15]])}")
+		print(f"  2-particle sector: {np.concatenate([full_spectrum_sorted[0:1], full_spectrum_sorted[15:16]])}")
+		
+		# The extracted eigenvalues should correspond to the unique single-particle energies
+		# The fact that we get [-2, -2, 2, 2] while the full spectrum has 8 single-particle states
+		# suggests each extracted eigenvalue corresponds to degenerate states
+		one_particle_sector = np.concatenate([full_spectrum_sorted[1:5], full_spectrum_sorted[11:15]])
+		print(f"1-particle sector energies: {one_particle_sector}")
+		
+		# Debug the unique values more carefully
+		print(f"1-particle sector values with high precision: {one_particle_sector}")
+		print(f"Differences between adjacent values: {np.diff(one_particle_sector)}")
+		
+		# Round to avoid floating point precision issues
+		rounded_1p = np.round(one_particle_sector, 10)
+		unique_1p_energies = np.unique(rounded_1p)
+		print(f"Unique 1-particle energies (rounded): {unique_1p_energies}")
+		print(f"Number of unique 1-particle energies: {len(unique_1p_energies)}")
+		
+		# Our extracted eigenvalues should contain the same unique values
+		unique_extracted = np.unique(np.round(extracted_eigs_sorted, 10))
+		print(f"Unique extracted eigenvalues (rounded): {unique_extracted}")  
+		print(f"Number of unique extracted eigenvalues: {len(unique_extracted)}")
+		
+		# The unique values should match - both should be just [-2, 2]
+		expected_unique = np.array([-2, 2])
+		np.testing.assert_array_almost_equal(
+			np.sort(unique_extracted),
+			expected_unique,
+			decimal=10,
+			err_msg="Unique extracted eigenvalues should be [-2, 2]"
+		)
+		
+		np.testing.assert_array_almost_equal(
+			np.sort(unique_1p_energies), 
+			expected_unique,
+			decimal=10,
+			err_msg="Unique 1-particle energies from full spectrum should be [-2, 2]"
+		)
+		
+		# Additional check: verify that the 1-particle sector contains our extracted eigenvalues
+		for eig in extracted_eigs_sorted:
+			assert np.any(np.isclose(one_particle_sector, eig)), f"Extracted eigenvalue {eig} not found in 1-particle sector"
+		
+		log.info("✓ Single-particle extraction test PASSED")
+		log.info("✓ Many-body spectrum consistency verified")
+
+

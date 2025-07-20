@@ -222,7 +222,7 @@ class QuickHubbard1D(CouplingMPOModel):
 						cluster_k_points=basis_object.cluster_k_points
 						# Calculate t_tilde for dx=1 within this cluster
 						t_tilde=(1/2)*(1/cluster_size)*np.array([2*t*np.cos(cluster_k_points[j])*(1/2)*2*t*np.cos(1*2*np.pi*j/cluster_size) for j in range(cluster_size)]).sum()
-						print(f"Adding t_tilde={t_tilde} cluster points={cluster_k_points}")
+						
 						
 						#NOTE!IMPORTANT!: here you are only adding once, so you dont need to halve
 						#so to correct you should mutiply t_tilde by 2
@@ -242,14 +242,19 @@ class QuickHubbard1D(CouplingMPOModel):
 				self.add_onsite(U, alpha, 'NuNd')  # Hubbard n_up n_down term
 					
 			#Add V as next-nearest neighbor coupling (site 0<->2, site 1<->3)
-			if abs(V) > 0:
-				# Use dx=2 for next-nearest neighbor with periodic BC
-				for alpha in range(len(self.lat.unit_cell)):
-					#NOTE! I think it's V/4 here because I added it as a NNN hopping term
-					#with hermitian conjugates in each so I double count.
-					self.add_coupling(V, alpha, 'Cdd', alpha, 'Cd', 2, plus_hc=True)
-					self.add_coupling(V, alpha, 'Cdu', alpha, 'Cu', 2, plus_hc=True)
+			# if abs(V) > 0:
+			# 	# Use dx=2 for next-nearest neighbor with periodic BC
+			# 	for alpha in range(len(self.lat.unit_cell)):
+			# 		#NOTE! I think it's V/4 here because I added it as a NNN hopping term
+			# 		#with hermitian conjugates in each so I double count.
+			# 		self.add_coupling(V, alpha, 'Cdd', alpha, 'Cd', 2, plus_hc=True)
+			# 		self.add_coupling(V, alpha, 'Cdu', alpha, 'Cu', 2, plus_hc=True)
 
+			if abs(V)>0:
+				self.add_coupling_term(V, 0, 2, 'Cdd', 'Cd', plus_hc=True)
+				self.add_coupling_term(V, 0, 2, 'Cdu', 'Cu', plus_hc=True)
+				self.add_coupling_term(V, 1, 3, 'Cdu', 'Cu', plus_hc=True)
+				self.add_coupling_term(V, 1, 3, 'Cdd', 'Cd', plus_hc=True)
 		else:
 			raise ValueError("No basis class provided")
 
@@ -471,6 +476,8 @@ def get_spectra(cluster_ks, state_params, physical_params,return_ham:bool=False)
 		total_cluster_size=cluster_k.shape[0]*cluster_k.shape[1]
 		test_basis_1=LocalClusterBasis(cluster_k[0],state_params)
 		test_basis_2=LocalClusterBasis(cluster_k[1],state_params)
+		logger.info(f'total_cluster size: {total_cluster_size}')
+		
 		test_ham=QuickHubbard1D({'basis_classes':[test_basis_1,test_basis_2],
 					'L':total_cluster_size,
 					'L_cluster':cluster_k.shape[0],
@@ -503,7 +510,7 @@ def get_spectra(cluster_ks, state_params, physical_params,return_ham:bool=False)
 	number_spectrum=np.stack(number_spectrum,axis=0)
 	spin_spectrum=np.stack(spin_spectrum,axis=0)
 
-	logger.info(f'spin spectrum shape: {spin_spectrum.shape}')
+	#logger.info(f'spin spectrum shape: {spin_spectrum.shape}')
 		
 	if return_ham:
 		return ham_objects
@@ -1989,8 +1996,8 @@ if __name__ == "__main__":
 	print('main')
 
 	# Test Hamiltonian inspection
-	test_hamiltonian_inspection()
-	exit()
+	# test_hamiltonian_inspection()
+	# exit()
 	
 	
 	
@@ -2003,9 +2010,9 @@ if __name__ == "__main__":
 
 	#compare the different methods
 	U_values=np.linspace(1e-6,1,1)
-	V_values=np.linspace(0,10,3)
+	V_values=np.linspace(0,1,1)
 
-	fig,line_figs=compare_methods_heatmap_mu_fixed(U_values,V_values,mu_fixed=None,t=0,show_line_plots=True)
+	fig,line_figs=compare_methods_heatmap_mu_fixed(U_values,V_values,mu_fixed=None,t=2,show_line_plots=True)
 	
 	
 	for line_fig in line_figs:
