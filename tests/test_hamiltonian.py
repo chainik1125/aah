@@ -7,107 +7,117 @@ from aah_code.hamiltonian import QuickHubbard1D, get_spectra, MismatchedQuick
 from aah_code.global_params import StatesParams, HamiltonianParams
 
 
+
 import tenpy as tp
 import logging
 from tenpy.algorithms import exact_diag
 import pandas as pd
+import copy
+import itertools
 
 import numpy as np
 from tenpy.algorithms import exact_diag
 from aah_code.matrix_display import matrix_to_dataframe, print_matrix
+try:
+	import tabulate  # optional pretty logging
+except ImportError:
+	class _TabulateFallback:
+		def tabulate(self, *args, **kwargs):
+			return ""
+	tabulate = _TabulateFallback()
 import tabulate
 
 
 def latex_matrix_with_labels(H, basis_labels=None, precision=3, col_align="c"):
-    r"""
-    Build a LaTeX string showing the matrix and its basis in one array‑block.
+	r"""
+	Build a LaTeX string showing the matrix and its basis in one array‑block.
 
-    Parameters
-    ----------
-    H : array_like, shape (n,n)
-        The matrix you want to display (e.g. from `single_particle_block`).
-    basis_labels : list[str] or None
-        Human‑readable labels for each basis ket in the same order as `H`.
-        If None, simple indices 0…n‑1 are used.
-    precision : int
-        Decimal places to print (uses general‐format `{:.<p>g}`).
-    col_align : str
-        Column alignment for LaTeX array (`c`, `r`, or `l`).
+	Parameters
+	----------
+	H : array_like, shape (n,n)
+		The matrix you want to display (e.g. from `single_particle_block`).
+	basis_labels : list[str] or None
+		Human‑readable labels for each basis ket in the same order as `H`.
+		If None, simple indices 0…n‑1 are used.
+	precision : int
+		Decimal places to print (uses general‐format `{:.<p>g}`).
+	col_align : str
+		Column alignment for LaTeX array (`c`, `r`, or `l`).
 
-    Returns
-    -------
-    latex : str
-        Ready‑to‑copy LaTeX code (enclosed in `\[ … \]`).
-    """
-    H = np.asarray(H)
-    n = H.shape[0]
-    if basis_labels is None:
-        basis_labels = [f"${i}$" for i in range(n)]
+	Returns
+	-------
+	latex : str
+		Ready‑to‑copy LaTeX code (enclosed in `\[ … \]`).
+	"""
+	H = np.asarray(H)
+	n = H.shape[0]
+	if basis_labels is None:
+		basis_labels = [f"${i}$" for i in range(n)]
 
-    # --- build the pmatrix body ------------------------------------------------
-    num_fmt = f"{{:.{precision}g}}"
-    body_rows = [
-        " & ".join(num_fmt.format(x) for x in H[i]) for i in range(n)
-    ]
-    pmatrix = "\\begin{pmatrix}\n" + " \\\\\n".join(body_rows) + "\n\\end{pmatrix}"
+	# --- build the pmatrix body ------------------------------------------------
+	num_fmt = f"{{:.{precision}g}}"
+	body_rows = [
+		" & ".join(num_fmt.format(x) for x in H[i]) for i in range(n)
+	]
+	pmatrix = "\\begin{pmatrix}\n" + " \\\\\n".join(body_rows) + "\n\\end{pmatrix}"
 
-    # --- assemble the outer array with row/col headers -------------------------
-    col_header = " & ".join([""] + basis_labels)
-    row_labels = " \\\\\n".join(basis_labels)  # end each line with \\
-    outer = (
-        "\\[\n"
-        "\\begin{array}{" + col_align * (n + 1) + "}\n"
-        + col_header + " \\\\\n\\hline\n"
-        + pmatrix + " & \\begin{array}{c}\n" + row_labels + "\n\\end{array}\n"
-        "\\end{array}\n"
-        "\\]\n"
-    )
-    return outer
+	# --- assemble the outer array with row/col headers -------------------------
+	col_header = " & ".join([""] + basis_labels)
+	row_labels = " \\\\\n".join(basis_labels)  # end each line with \\
+	outer = (
+		"\\[\n"
+		"\\begin{array}{" + col_align * (n + 1) + "}\n"
+		+ col_header + " \\\\\n\\hline\n"
+		+ pmatrix + " & \\begin{array}{c}\n" + row_labels + "\n\\end{array}\n"
+		"\\end{array}\n"
+		"\\]\n"
+	)
+	return outer
 
 def single_particle_block(model, spin=None, from_mpo=True):
-    """
-    Return the 1‑particle Hamiltonian in the requested spin sector.
+	"""
+	Return the 1‑particle Hamiltonian in the requested spin sector.
 
-    Parameters
-    ----------
-    model : CouplingMPOModel
-        Your TeNPy Hubbard model (already initialised).
-    spin  : {None, 'up', 'down'}, optional
-        • None  → keep both spins (default, size 2L × 2L)  
-        • 'up'  → project onto N=1, S_z=+½   (size L × L)  
-        • 'down'→ project onto N=1, S_z=‑½   (size L × L)
-    from_mpo : bool
-        Passed straight to `exact_diag.get_numpy_Hamiltonian`.
+	Parameters
+	----------
+	model : CouplingMPOModel
+		Your TeNPy Hubbard model (already initialised).
+	spin  : {None, 'up', 'down'}, optional
+		• None  → keep both spins (default, size 2L × 2L)  
+		• 'up'  → project onto N=1, S_z=+½   (size L × L)  
+		• 'down'→ project onto N=1, S_z=‑½   (size L × L)
+	from_mpo : bool
+		Passed straight to `exact_diag.get_numpy_Hamiltonian`.
 
-    Returns
-    -------
-    H1 : (n,n) complex ndarray
-        Dense matrix in the chosen sub‑space.
-    """
-    # full Hamiltonian in occupation basis |σ₁σ₂…σ_L⟩
-    H = exact_diag.get_numpy_Hamiltonian(model, from_mpo=from_mpo)
+	Returns
+	-------
+	H1 : (n,n) complex ndarray
+		Dense matrix in the chosen sub‑space.
+	"""
+	# full Hamiltonian in occupation basis |σ₁σ₂…σ_L⟩
+	H = exact_diag.get_numpy_Hamiltonian(model, from_mpo=from_mpo)
 
-    L           = model.lat.N_sites
-    occ_per_st  = np.array([0, 1, 1, 2], dtype=np.uint8)  # |0>,|↑>,|↓>,|↑↓>
-    spin_per_st = np.array([ 0, 1,-1, 0], dtype=np.int8)  #   0 , +1 , -1 ,  0
+	L           = model.lat.N_sites
+	occ_per_st  = np.array([0, 1, 1, 2], dtype=np.uint8)  # |0>,|↑>,|↓>,|↑↓>
+	spin_per_st = np.array([ 0, 1,-1, 0], dtype=np.int8)  #   0 , +1 , -1 ,  0
 
-    want_spin = {'up': 1, 'down': -1, None: 0}[spin]      # 0 ⇒ accept ±1
+	want_spin = {'up': 1, 'down': -1, None: 0}[spin]      # 0 ⇒ accept ±1
 
-    keep = []
-    for idx in range(4**L):
-        tmp, n, sz = idx, 0, 0
-        for _ in range(L):
-            st   = tmp & 3           # %4, faster
-            n   += occ_per_st [st]
-            sz  += spin_per_st[st]
-            tmp >>= 2                # //4
-            if n > 1:                # early exit
-                break
-        if n == 1 and (want_spin == 0 or sz == want_spin):
-            keep.append(idx)
+	keep = []
+	for idx in range(4**L):
+		tmp, n, sz = idx, 0, 0
+		for _ in range(L):
+			st   = tmp & 3           # %4, faster
+			n   += occ_per_st [st]
+			sz  += spin_per_st[st]
+			tmp >>= 2                # //4
+			if n > 1:                # early exit
+				break
+		if n == 1 and (want_spin == 0 or sz == want_spin):
+			keep.append(idx)
 
-    keep = np.asarray(keep, dtype=np.int64)
-    return H[np.ix_(keep, keep)]
+	keep = np.asarray(keep, dtype=np.int64)
+	return H[np.ix_(keep, keep)]
 
 
 
@@ -179,52 +189,103 @@ def extract_single_particle_hamiltonian(mpo_hamiltonian):
 
 
 
-def get_single_matched(cluster_size,lattice_points,ham_dict_matched_base,state_params):
-    #TODO: This should all be one function - namely the one you use in your loops!
-    matched_lattice_object=ClusterExperiment(cluster_size,lattice_points,lattice_points//2)
-    matched_ks=matched_lattice_object.generate_clusters()
-    single_particle_hams=[]
-    eigvals=[]
-    #log.debug(f'matched k shape: {matched_ks.shape}')
-    d = lattice_points//4
-    N = matched_ks.shape[0]
-    if N < d + 1:
-        raise ValueError("Need at least d+1 slices to form one pair")
-    n_pairs = N - d           # here: 4 − 2 = 2
-    first  = matched_ks[:n_pairs]        # A[0], A[1]    → shape (2,2,1)
-    second = matched_ks[d:d + n_pairs]   # A[2], A[3]    → shape (2,2,1)
-    matched_clusters = np.stack((first, second), axis=1)
+def get_single_matched(cluster_size,lattice_points,ham_dict_matched_base,state_params,physical_params,get_many_body:bool=False):
+	#TODO: This should all be one function - namely the one you use in your loops!
+	matched_lattice_object=ClusterExperiment(cluster_size,lattice_points,lattice_points//2)
+	matched_ks=matched_lattice_object.generate_clusters()
+	single_particle_hams=[]
+	many_body_eigvals=[]
+	eigvals=[]
+	#log.debug(f'matched k shape: {matched_ks.shape}')
+	d = lattice_points//4
+	N = matched_ks.shape[0]
+	if N < d + 1:
+		raise ValueError("Need at least d+1 slices to form one pair")
+	n_pairs = N - d           # here: 4 − 2 = 2
+	first  = matched_ks[:n_pairs]        # A[0], A[1]    → shape (2,2,1)
+	second = matched_ks[d:d + n_pairs]   # A[2], A[3]    → shape (2,2,1)
+	matched_clusters = np.stack((first, second), axis=1)
 
-    
+	
 
-    for matched_cluster in matched_clusters:
-        cluster_eigvals=[]
-        cluster_hams=[]
-        for k in matched_cluster:
-            test_basis=LocalClusterBasis(k,state_params)
-            ham_dict_matched_base['basis_class']=test_basis
+	for matched_cluster in matched_clusters:
+		cluster_eigvals=[]
+		cluster_hams=[]
+		for k in matched_cluster:
+			test_basis=LocalClusterBasis(k,state_params)
+			ham_dict_matched_base['basis_class']=test_basis
 			# ham_dict_matched = {
-            #     'basis_class': test_basis,
-            #     'V': V,
-            #     't': t,
-            #     'mu': mu,
-            #     'U': U,
-            # }
-            matched_ham=Hubbard1D(ham_dict_matched_base)
-            single_particle_matched=single_particle_block(matched_ham,spin='up')
-            matched_evals,matched_evecs=np.linalg.eigh(single_particle_matched)
-            cluster_eigvals.append(matched_evals)
-            cluster_hams.append(single_particle_matched)
-    
-        #NOTE! Don't confuse the single particle and the filled spectrum!
-        combined_energy_vals=np.stack([cluster_eigvals[i][j] for i in range(cluster_eigvals[0].shape[0]) for j in range(cluster_eigvals[1].shape[0])],axis=0)
-        combined_energy_vals=np.sort(combined_energy_vals,axis=0)
+			#     'basis_class': test_basis,
+			#     'V': V,
+			#     't': t,
+			#     'mu': mu,
+			#     'U': U,
+			# }
+			matched_ham=Hubbard1D(ham_dict_matched_base)
+			single_particle_matched=single_particle_block(matched_ham,spin='up')
+			matched_evals,matched_evecs=np.linalg.eigh(single_particle_matched)
+			if get_many_body:
+				many_body_ham_np=exact_diag.get_numpy_Hamiltonian(matched_ham, from_mpo=True)
+				many_body_evals,many_body_evecs=np.linalg.eigh(many_body_ham_np)
+				many_body_eigvals.append(many_body_evals)
+			cluster_eigvals.append(matched_evals)
+			cluster_hams.append(single_particle_matched)
+	
+		#NOTE! Don't confuse the single particle and the filled spectrum!
+		combined_energy_vals=np.stack([cluster_eigvals[i][j] for i in range(cluster_eigvals[0].shape[0]) for j in range(cluster_eigvals[1].shape[0])],axis=0)
+		combined_energy_vals=np.sort(combined_energy_vals,axis=0)
 
-        eigvals.append(combined_energy_vals)
-        single_particle_hams.append(cluster_hams)
+		eigvals.append(combined_energy_vals)
+		single_particle_hams.append(cluster_hams)
+		
 
-    
-    return np.array(eigvals), single_particle_hams,matched_clusters
+	if get_many_body:
+		return np.array(eigvals), single_particle_hams,matched_clusters,np.array(many_body_eigvals)
+
+	
+	return np.array(eigvals), single_particle_hams,matched_clusters
+
+
+def get_single_mismatched(cluster_size,lattice_points,ham_dict_mismatched_base,state_params,physical_params):
+	
+	mismatched_lattice_object=ClusterExperiment(cluster_size,lattice_points,lattice_points//4)
+	mismatch_obj=MismatchedQuick(mismatched_lattice_object,physical_params,V_k_period=lattice_points//2)
+	mismatched_ks=mismatch_obj.recluster()[0]
+	log.debug(f'mismatched_ks shape: {mismatched_ks.shape}')
+	eigvals=[]
+	single_particle_hams=[]
+	for k in mismatched_ks:
+		log.debug(f"mismatched k (pi units): {k/np.pi}")
+		sub_cluster_1=LocalClusterBasis(k[0],state_params)
+		sub_cluster_2=LocalClusterBasis(k[1],state_params)
+
+		ham_dict_mismatched={
+	  'basis_classes':[sub_cluster_1,sub_cluster_2],
+				'L':k[0].shape[0]*k[1].shape[0],
+				'L_cluster':k[0].shape[0],
+				'V':ham_dict_mismatched_base['V'],
+				't':ham_dict_mismatched_base['t'],
+				'U':ham_dict_mismatched_base['U'],
+				'mu':ham_dict_mismatched_base['mu'],
+				}
+		# ham_dict_mismatched_base['basis_classes']=[sub_cluster_1,sub_cluster_2]
+		# ham_dict_mismatched_base['L']=k[0].shape[0]*k[1].shape[0]
+		# ham_dict_mismatched_base['L_cluster']=k[0].shape[0]
+
+		log.debug(f'ham dict mismatched:\n {ham_dict_mismatched}')
+
+		mismatched_ham=QuickHubbard1D(ham_dict_mismatched)
+		mismatched_single_particle=single_particle_block(mismatched_ham,spin='up')
+		mismatched_evals,mismatched_evecs=np.linalg.eigh(mismatched_single_particle)
+
+		eigvals.append(mismatched_evals)
+		single_particle_hams.append(mismatched_single_particle)
+	
+	
+	mismatched_combined_eigvals=np.array(eigvals)
+
+
+	return mismatched_combined_eigvals,single_particle_hams,mismatched_ks
 
 
 
@@ -810,46 +871,6 @@ class TestHamiltonian:
 		
 		#function for making and then extracting the single particle hamiltonian of matched case
 
-		
-
-		def get_single_mismatched():
-			mismatched_lattice_object=ClusterExperiment(cluster_size,lattice_points,lattice_points//4)
-			mismatch_obj=MismatchedQuick(mismatched_lattice_object,physical_params,V_k_period=lattice_points//2)
-			mismatched_ks=mismatch_obj.recluster()[0]
-
-			
-			
-
-			eigvals=[]
-			single_particle_hams=[]
-			for k in mismatched_ks:
-				log.debug(f"matched k (pi units): {k/np.pi}")
-				sub_cluster_1=LocalClusterBasis(k[0],state_params)
-				sub_cluster_2=LocalClusterBasis(k[1],state_params)
-				ham_dict_mismatched={
-					'basis_classes':[sub_cluster_1,sub_cluster_2],
-							'L':k[0].shape[0]*k[1].shape[0],
-							'L_cluster':k[0].shape[0],
-							'V':V,
-							't':t,
-							'U':U,
-							'mu':mu,			
-				}
-
-				mismatched_ham=QuickHubbard1D(ham_dict_mismatched)
-				mismatched_single_particle=single_particle_block(mismatched_ham,spin='up')
-				mismatched_evals,mismatched_evecs=np.linalg.eigh(mismatched_single_particle)
-
-				eigvals.append(mismatched_evals)
-				single_particle_hams.append(mismatched_single_particle)
-			
-
-
-			
-			mismatched_combined_eigvals=np.array(eigvals)
-			return mismatched_combined_eigvals,single_particle_hams,mismatched_ks
-			
-
 			
 		ham_dict_matched_base = {
 				'V': V,
@@ -858,16 +879,18 @@ class TestHamiltonian:
 				'U': U,
 			}
 		
-		matched_combined_evals,matched_single_particle_hams,matched_ks=get_single_matched(cluster_size,lattice_points,ham_dict_matched_base,state_params)
-		
-		
-		mismatched_combined_eigvals,mismatched_single_particle_hams,mismatched_ks=get_single_mismatched()
 
-		print(f'matched ks shape: {matched_ks.shape},mismatched ks shape: {mismatched_ks.shape}')
-		print(f'matched ks: {matched_ks/np.pi},mismatched ks: {mismatched_ks/np.pi}')
+		
+		matched_combined_evals,matched_single_particle_hams,matched_ks=get_single_matched(cluster_size,lattice_points,copy.deepcopy(ham_dict_matched_base),state_params,physical_params)
+		
+		
+		mismatched_combined_eigvals,mismatched_single_particle_hams,mismatched_ks=get_single_mismatched(cluster_size,lattice_points,copy.deepcopy(ham_dict_matched_base),state_params,physical_params)
+
+		log.debug(f'matched ks shape: {matched_ks.shape},mismatched ks shape: {mismatched_ks.shape}')
+		log.debug(f'matched ks: {matched_ks/np.pi},mismatched ks: {mismatched_ks/np.pi}')
 		#return None
-		print(f'eigvals shape: {matched_combined_evals},mismatched eigvals shape: {mismatched_combined_eigvals.shape}')
-		print(f'eigvals matched: {matched_combined_evals}\n eigvals mismatched: {mismatched_combined_eigvals}')
+		log.debug(f'eigvals shape: {matched_combined_evals.shape},mismatched eigvals shape: {mismatched_combined_eigvals.shape}')
+		log.debug(f'eigvals matched: {matched_combined_evals}\n eigvals mismatched: {mismatched_combined_eigvals}')
 
 		try:
 			np.testing.assert_array_almost_equal(
@@ -895,13 +918,13 @@ class TestHamiltonian:
 				log.debug("\n" + tabulate.tabulate(df.values, headers=df.columns, tablefmt="grid", showindex=True))
 		
 		log.debug('mismatched case ham')
-		for ham in mismatched_single_particle_hams:
-			
-			labels = [f"|site {i}⟩" for i in range(ham.shape[0])]
-
-			df = matrix_to_dataframe(ham, labels, precision=2)
-			print_matrix(df, style="tabulate", tablefmt="grid")
-			log.debug("\n" + tabulate.tabulate(df.values, headers=df.columns, tablefmt="grid", showindex=True))
+		for cluster in mismatched_single_particle_hams:
+			#for ham in cluster:
+				labels = [f"|site {i}⟩" for i in range(cluster.shape[0])]
+				log.debug(f"Ham shape before matrix_to_dataframe: {cluster.shape}")
+				df = matrix_to_dataframe(cluster, labels, precision=2)
+				print_matrix(df, style="tabulate", tablefmt="grid")
+				log.debug("\n" + tabulate.tabulate(df.values, headers=df.columns, tablefmt="grid", showindex=True))
 		
 
 		log.debug(f'matched spectrum: {matched_combined_evals.round(2)}')
@@ -912,7 +935,108 @@ class TestHamiltonian:
 	def test_manybody_sum_single_particle(self):
 		"""
 		A test to check whether the many-body spectrum reduces to a sum of one-particle spectra.
+		TODO: A nice way to write this function would be to feed in the functon which extracts the 
+		single particle block and the lattice parameters as arguments so that you can process it directly.
 		"""
+
+
+		#Initial definitions
+		state_params = StatesParams(spin_states=2)
+		lattice_points=4
+		cluster_size=2
+		#physical params
+		t = 1.0
+		U = 0
+		V = 2
+		mu = 0
+		physical_params=HamiltonianParams(U,V,t,mu)
+
+		
+		#function for making and then extracting the single particle hamiltonian of matched case
+			
+		ham_dict_matched_base = {
+				'V': V,
+				't': t,
+				'mu': mu,
+				'U': U,
+			}
+		
+
+		matched_combined_evals,matched_single_particle_hams,matched_ks,many_body_eigvals=get_single_matched(cluster_size,lattice_points,copy.deepcopy(ham_dict_matched_base),state_params,physical_params,True)
+
+		log.debug(f'many body evals shape: {many_body_eigvals.shape}')
+		log.debug(f'matched_combined_evals shape: {matched_combined_evals.shape}')
+		log.debug(f'sp hams length: {matched_single_particle_hams[0][0].shape}')
+		#So note that the many_body_eigvals is [ks,d_sp] and single_particle_hams is k*[d_sp/2] (because you neglect spin.) 
+
+		sp_hams_array_CSDD=np.stack(np.array(matched_single_particle_hams),axis=0)
+
+		log.debug(f'sp hams array shape: {sp_hams_array_CSDD.shape}')
+
+		sp_eigvals_CSD, sp_eigvecs_CSDD = np.linalg.eigh(sp_hams_array_CSDD)
+
+		log.debug(f'sp eigvals shape: {sp_eigvals_CSD.shape}')
+
+		def get_many_body_from_single_particle(single_particle_eigvals,total_particles,spin_projected=True):
+			"""
+			function to get the spectrum for total_particles copies of the single particle eigvals
+			"""
+			
+			#if spin_projected=False, then you assume you have the full spectrum with each spin accounted for.
+			if spin_projected:
+				single_particle_eigvals=np.repeat(single_particle_eigvals,2)
+
+			log.debug(f'single particle eigvals shape: {single_particle_eigvals.shape}')
+					
+			energies = []
+			for k in range(total_particles + 1):
+				# Generate sums directly, avoid storing combinations
+				vals = np.fromiter(
+					(sum(c) for c in itertools.combinations(single_particle_eigvals, k)),
+					dtype=float
+				)
+				#log.debug(f'particle number: {k}, vals shape: {vals.shape}')
+				energies.append(vals)
+			# flatten once at the end
+			energies = np.concatenate(energies)
+			return np.sort(energies)
+		
+
+		mb_from_sp_energies=np.zeros((sp_eigvals_CSD.shape[0],sp_eigvals_CSD.shape[1],16))
+		
+		for cluster in range(sp_eigvals_CSD.shape[0]):
+			for k in range(sp_eigvals_CSD.shape[1]):
+				mb_from_sp_energies[cluster,k,:]=get_many_body_from_single_particle(sp_eigvals_CSD[cluster,k,:],4,spin_projected=True)
+		
+		log.debug(f'mb from sp energies shape: {mb_from_sp_energies.shape}')
+
+		np.testing.assert_array_almost_equal(
+			mb_from_sp_energies[0],
+			many_body_eigvals,
+			err_msg="Many Body Reconstruction from single particle failed"
+		)
+		
+		# log.debug(f'mb from sp energies: {mb_from_sp_energies[0]}')
+		# log.debug(f'many body eigvals: {many_body_eigvals}')
+
+		# log.debug(f'test res: {test_res}')
+		
+		
+
+
+
+		
+			
+
+			
+			
+			
+
+
+		
+
+		
+
 		
 
 		return None
