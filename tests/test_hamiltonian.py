@@ -175,12 +175,60 @@ def extract_single_particle_hamiltonian(mpo_hamiltonian):
 
 
 
+
+
+
+
+def get_single_matched(cluster_size,lattice_points,ham_dict_matched_base,state_params):
+    #TODO: This should all be one function - namely the one you use in your loops!
+    matched_lattice_object=ClusterExperiment(cluster_size,lattice_points,lattice_points//2)
+    matched_ks=matched_lattice_object.generate_clusters()
+    single_particle_hams=[]
+    eigvals=[]
+    #log.debug(f'matched k shape: {matched_ks.shape}')
+    d = lattice_points//4
+    N = matched_ks.shape[0]
+    if N < d + 1:
+        raise ValueError("Need at least d+1 slices to form one pair")
+    n_pairs = N - d           # here: 4 − 2 = 2
+    first  = matched_ks[:n_pairs]        # A[0], A[1]    → shape (2,2,1)
+    second = matched_ks[d:d + n_pairs]   # A[2], A[3]    → shape (2,2,1)
+    matched_clusters = np.stack((first, second), axis=1)
+
+    
+
+    for matched_cluster in matched_clusters:
+        cluster_eigvals=[]
+        cluster_hams=[]
+        for k in matched_cluster:
+            test_basis=LocalClusterBasis(k,state_params)
+            ham_dict_matched_base['basis_class']=test_basis
+			# ham_dict_matched = {
+            #     'basis_class': test_basis,
+            #     'V': V,
+            #     't': t,
+            #     'mu': mu,
+            #     'U': U,
+            # }
+            matched_ham=Hubbard1D(ham_dict_matched_base)
+            single_particle_matched=single_particle_block(matched_ham,spin='up')
+            matched_evals,matched_evecs=np.linalg.eigh(single_particle_matched)
+            cluster_eigvals.append(matched_evals)
+            cluster_hams.append(single_particle_matched)
+    
+        #NOTE! Don't confuse the single particle and the filled spectrum!
+        combined_energy_vals=np.stack([cluster_eigvals[i][j] for i in range(cluster_eigvals[0].shape[0]) for j in range(cluster_eigvals[1].shape[0])],axis=0)
+        combined_energy_vals=np.sort(combined_energy_vals,axis=0)
+
+        eigvals.append(combined_energy_vals)
+        single_particle_hams.append(cluster_hams)
+
+    
+    return np.array(eigvals), single_particle_hams,matched_clusters
+
+
+
 log = logging.getLogger(__name__)
-
-
-
-
-
 
 class TestHamiltonian:
 
@@ -750,7 +798,7 @@ class TestHamiltonian:
 
 		#Initial definitions
 		state_params = StatesParams(spin_states=2)
-		lattice_points=20
+		lattice_points=4
 		cluster_size=2
 		#physical params
 		t = 1.0
@@ -761,51 +809,7 @@ class TestHamiltonian:
 
 		
 		#function for making and then extracting the single particle hamiltonian of matched case
-		def get_single_matched():
-			#TODO: This should all be one function - namely the one you use in your loops!
-			matched_lattice_object=ClusterExperiment(cluster_size,lattice_points,lattice_points//2)
-			matched_ks=matched_lattice_object.generate_clusters()
-			single_particle_hams=[]
-			eigvals=[]
-			log.debug(f'matched k shape: {matched_ks.shape}')
-			d = lattice_points//4
-			N = matched_ks.shape[0]
-			if N < d + 1:
-				raise ValueError("Need at least d+1 slices to form one pair")
-			n_pairs = N - d           # here: 4 − 2 = 2
-			first  = matched_ks[:n_pairs]        # A[0], A[1]    → shape (2,2,1)
-			second = matched_ks[d:d + n_pairs]   # A[2], A[3]    → shape (2,2,1)
-			matched_clusters = np.stack((first, second), axis=1)
 
-			
-
-			for matched_cluster in matched_clusters:
-				cluster_eigvals=[]
-				cluster_hams=[]
-				for k in matched_cluster:
-					test_basis=LocalClusterBasis(k,state_params)
-					ham_dict_matched = {
-						'basis_class': test_basis,
-						'V': V,
-						't': t,
-						'mu': mu,
-						'U': U,
-					}
-					matched_ham=Hubbard1D(ham_dict_matched)
-					single_particle_matched=single_particle_block(matched_ham,spin='up')
-					matched_evals,matched_evecs=np.linalg.eigh(single_particle_matched)
-					cluster_eigvals.append(matched_evals)
-					cluster_hams.append(single_particle_matched)
-			
-				#NOTE! Don't confuse the single particle and the filled spectrum!
-				combined_energy_vals=np.stack([cluster_eigvals[i][j] for i in range(cluster_eigvals[0].shape[0]) for j in range(cluster_eigvals[1].shape[0])],axis=0)
-				combined_energy_vals=np.sort(combined_energy_vals,axis=0)
-
-				eigvals.append(combined_energy_vals)
-				single_particle_hams.append(cluster_hams)
-
-			
-			return np.array(eigvals), single_particle_hams,matched_clusters
 		
 
 		def get_single_mismatched():
@@ -846,10 +850,15 @@ class TestHamiltonian:
 			return mismatched_combined_eigvals,single_particle_hams,mismatched_ks
 			
 
+			
+		ham_dict_matched_base = {
+				'V': V,
+				't': t,
+				'mu': mu,
+				'U': U,
+			}
 		
-		
-		
-		matched_combined_evals,matched_single_particle_hams,matched_ks=get_single_matched()
+		matched_combined_evals,matched_single_particle_hams,matched_ks=get_single_matched(cluster_size,lattice_points,ham_dict_matched_base,state_params)
 		
 		
 		mismatched_combined_eigvals,mismatched_single_particle_hams,mismatched_ks=get_single_mismatched()
@@ -898,13 +907,13 @@ class TestHamiltonian:
 		log.debug(f'matched spectrum: {matched_combined_evals.round(2)}')
 		log.debug(f'mismatched spectrum: {mismatched_combined_eigvals.round(2)}')
 
-
+		return None
+	
+	def test_manybody_sum_single_particle(self):
+		"""
+		A test to check whether the many-body spectrum reduces to a sum of one-particle spectra.
+		"""
 		
-
-
-			
-
-
 
 		return None
 
