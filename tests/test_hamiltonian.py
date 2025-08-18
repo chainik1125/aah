@@ -15,6 +15,7 @@ import pandas as pd
 import numpy as np
 from tenpy.algorithms import exact_diag
 from aah_code.matrix_display import matrix_to_dataframe, print_matrix
+import tabulate
 
 
 def latex_matrix_with_labels(H, basis_labels=None, precision=3, col_align="c"):
@@ -749,7 +750,7 @@ class TestHamiltonian:
 
 		#Initial definitions
 		state_params = StatesParams(spin_states=2)
-		lattice_points=40
+		lattice_points=20
 		cluster_size=2
 		#physical params
 		t = 1.0
@@ -775,6 +776,8 @@ class TestHamiltonian:
 			first  = matched_ks[:n_pairs]        # A[0], A[1]    → shape (2,2,1)
 			second = matched_ks[d:d + n_pairs]   # A[2], A[3]    → shape (2,2,1)
 			matched_clusters = np.stack((first, second), axis=1)
+
+			
 
 			for matched_cluster in matched_clusters:
 				cluster_eigvals=[]
@@ -802,13 +805,16 @@ class TestHamiltonian:
 				single_particle_hams.append(cluster_hams)
 
 			
-			return np.array(eigvals), single_particle_hams
+			return np.array(eigvals), single_particle_hams,matched_clusters
 		
 
 		def get_single_mismatched():
 			mismatched_lattice_object=ClusterExperiment(cluster_size,lattice_points,lattice_points//4)
 			mismatch_obj=MismatchedQuick(mismatched_lattice_object,physical_params,V_k_period=lattice_points//2)
 			mismatched_ks=mismatch_obj.recluster()[0]
+
+			
+			
 
 			eigvals=[]
 			single_particle_hams=[]
@@ -837,14 +843,20 @@ class TestHamiltonian:
 
 			
 			mismatched_combined_eigvals=np.array(eigvals)
-			return mismatched_combined_eigvals,single_particle_hams
+			return mismatched_combined_eigvals,single_particle_hams,mismatched_ks
 			
 
 		
-		matched_combined_evals,matched_single_particle_hams=get_single_matched()
 		
 		
-		mismatched_combined_eigvals,mismatched_single_particle_hams=get_single_mismatched()
+		matched_combined_evals,matched_single_particle_hams,matched_ks=get_single_matched()
+		
+		
+		mismatched_combined_eigvals,mismatched_single_particle_hams,mismatched_ks=get_single_mismatched()
+
+		print(f'matched ks shape: {matched_ks.shape},mismatched ks shape: {mismatched_ks.shape}')
+		print(f'matched ks: {matched_ks/np.pi},mismatched ks: {mismatched_ks/np.pi}')
+		#return None
 		print(f'eigvals shape: {matched_combined_evals},mismatched eigvals shape: {mismatched_combined_eigvals.shape}')
 		print(f'eigvals matched: {matched_combined_evals}\n eigvals mismatched: {mismatched_combined_eigvals}')
 
@@ -860,18 +872,18 @@ class TestHamiltonian:
 			raise AssertionError(f"Energy mismatch for four site single particle") from e	
 
 		
-		return None
+		#return None
 
 
 		#print(f'mismatched spectrum: {mis_eigvals[0].round(2)}')
 		
 		log.debug('matched case hams')
-		for ham in matched_single_particle_hams:
-			
-			labels = [f"|site {i}⟩" for i in range(ham.shape[0])]
-
-			df = matrix_to_dataframe(ham, labels, precision=2)
-			print_matrix(df, style="tabulate", tablefmt="grid")
+		for cluster in matched_single_particle_hams:
+			for ham in cluster:
+				labels = [f"|site {i}⟩" for i in range(ham.shape[0])]
+				df = matrix_to_dataframe(ham, labels, precision=2)
+				print_matrix(df, style="tabulate", tablefmt="grid")
+				log.debug("\n" + tabulate.tabulate(df.values, headers=df.columns, tablefmt="grid", showindex=True))
 		
 		log.debug('mismatched case ham')
 		for ham in mismatched_single_particle_hams:
@@ -880,6 +892,7 @@ class TestHamiltonian:
 
 			df = matrix_to_dataframe(ham, labels, precision=2)
 			print_matrix(df, style="tabulate", tablefmt="grid")
+			log.debug("\n" + tabulate.tabulate(df.values, headers=df.columns, tablefmt="grid", showindex=True))
 		
 
 		log.debug(f'matched spectrum: {matched_combined_evals.round(2)}')

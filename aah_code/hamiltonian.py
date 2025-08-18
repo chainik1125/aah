@@ -25,7 +25,7 @@ from tqdm import tqdm
 
 from aah_code.real_space_dmrg import run_dmrg_method, get_gnd_infinite,get_gnd
 # Set Plotly to use browser renderer to avoid nbformat issues
-pio.renderers.default = "browser"
+#pio.renderers.default = "browser"
 
 
 logger=logging.getLogger(__name__)
@@ -1147,9 +1147,9 @@ def compare_methods_heatmap_mu_fixed(U_values, V_values, mu_fixed=None, t=1, sho
 	cluster_size = 2
 	chi = 32
 	
-	print(f"Computing heatmap for U values: {U_values}")
-	print(f"V values: {V_values}")
-	print(f"t = {t}")
+	tqdm.write(f"Computing heatmap for U values: {U_values}")
+	tqdm.write(f"V values: {V_values}")
+	tqdm.write(f"t = {t}")
 	
 	for i, V in tqdm(enumerate(V_values)):
 		# Initialize storage for this V (for line plots)
@@ -1172,26 +1172,26 @@ def compare_methods_heatmap_mu_fixed(U_values, V_values, mu_fixed=None, t=1, sho
 			else:
 				mu_0 = mu_fixed
 				logger.info(f"Using fixed chemical potential: μ₀ = {mu_fixed}, U: {U}")
-			print(f"\nComputing U = {U}, V = {V}, μ₀ = {mu_0}")
+			tqdm.write(f"\nComputing U = {U}, V = {V}, μ₀ = {mu_0}")
 			
 			# 1. DMRG method (reference)
-			print("Running DMRG...")
+			tqdm.write("Running DMRG...")
 			energy_dmrg, filling_dmrg, psi_dmrg = run_dmrg_method(U, mu_0, V, t, system_size, chi)
 			energy_dmrg_subtracted = energy_dmrg + (mu_0 * filling_dmrg)
 			
 			# 2. Two-site analytical
-			print("Running two-site analytical...")
+			tqdm.write("Running two-site analytical...")
 			energy_twosite = run_twosite(U, mu_0, V, t, system_size)
 			filling_twosite = 1.0  # Half-filling by construction
 			
 			# 3. Cluster method (2-site clusters)
-			print("Running 2-site cluster method...")
+			tqdm.write("Running 2-site cluster method...")
 			energy_cluster_2, filling_cluster_2 = run_cluster_method(U, mu_0, V, t, system_size)
 			energy_cluster_2_subtracted = (energy_cluster_2 + mu_0 * filling_cluster_2) / system_size
 			filling_cluster_2_normalized = filling_cluster_2 / system_size
 			
 			# 4. Four-site cluster method
-			print("Running 4-site cluster method...")
+			tqdm.write("Running 4-site cluster method...")
 			physical_params = HamiltonianParams(U, V, t, mu_0)
 			system_expectations, _ = test_quick_mismatched(lattice_points, cluster_size, physical_params)
 			total_energy, total_filling, _ = system_expectations
@@ -1219,10 +1219,10 @@ def compare_methods_heatmap_mu_fixed(U_values, V_values, mu_fixed=None, t=1, sho
 				line_plot_results[V]['fillings_cluster_2site'].append(filling_cluster_2_normalized)
 				line_plot_results[V]['fillings_cluster_4site'].append(filling_cluster_4_normalized)
 			
-			print(f"DMRG:              E={energy_dmrg_subtracted:.3f}, n={filling_dmrg:.3f}")
-			print(f"Two-site:          E={energy_twosite:.3f}, n={filling_twosite:.3f}, diff={energy_diff_2site_analytical[i,j]:.1f}%")
-			print(f"Cluster (2-site):  E={energy_cluster_2_subtracted:.3f}, n={filling_cluster_2_normalized:.3f}, diff={energy_diff_2site_cluster[i,j]:.1f}%")
-			print(f"Cluster (4-site):  E={energy_cluster_4_subtracted:.3f}, n={filling_cluster_4_normalized:.3f}, diff={energy_diff_4site_cluster[i,j]:.1f}%")
+			tqdm.write(f"DMRG:              E={energy_dmrg_subtracted:.3f}, n={filling_dmrg:.3f}")
+			tqdm.write(f"Two-site:          E={energy_twosite:.3f}, n={filling_twosite:.3f}, diff={energy_diff_2site_analytical[i,j]:.1f}%")
+			tqdm.write(f"Cluster (2-site):  E={energy_cluster_2_subtracted:.3f}, n={filling_cluster_2_normalized:.3f}, diff={energy_diff_2site_cluster[i,j]:.1f}%")
+			tqdm.write(f"Cluster (4-site):  E={energy_cluster_4_subtracted:.3f}, n={filling_cluster_4_normalized:.3f}, diff={energy_diff_4site_cluster[i,j]:.1f}%")
 	
 	# Calculate symmetric range for energy differences
 	all_energy_diffs = np.concatenate([

@@ -17,6 +17,7 @@ dependencies = [
     "numpy",
     "physics-tenpy",
     "python-dotenv",
+    "tabulate",
 ]
 
 
