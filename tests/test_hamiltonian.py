@@ -950,10 +950,10 @@ class TestHamiltonian:
 		
 		log.debug('mismatched case ham')
 		for cluster in mismatched_single_particle_hams:
-			#for ham in cluster:
-				labels = [f"|site {i}⟩" for i in range(cluster.shape[0])]
-				log.debug(f"Ham shape before matrix_to_dataframe: {cluster.shape}")
-				df = matrix_to_dataframe(cluster, labels, precision=2)
+			for ham in cluster:
+				labels = [f"|site {i}⟩" for i in range(ham.shape[0])]
+				log.debug(f"Ham shape before matrix_to_dataframe: {ham.shape}")
+				df = matrix_to_dataframe(ham, labels, precision=2)
 				print_matrix(df, style="tabulate", tablefmt="grid")
 				log.debug("\n" + tabulate.tabulate(df.values, headers=df.columns, tablefmt="grid", showindex=True))
 		
@@ -1084,20 +1084,7 @@ class TestHamiltonian:
 		log.debug(f'many body evals shape: {many_body_eigvals.shape}')
 		
 		# Debug: print actual values to understand the mismatch
-		print(f"\nDEBUG INFO:")
-		print(f"Single-particle eigenvalues for first cluster, first k:")
-		print(f"Shape: {sp_eigvals_CSD.shape}")
-		print(f"Values: {sp_eigvals_CSD[0, 0, :]}")
 		
-		print(f"\nConstructed many-body spectrum (first 10 values):")
-		print(f"mb_from_sp_energies[0,0,:10]: {mb_from_sp_energies[0,0,:10]}")
-		
-		print(f"\nActual many-body spectrum from TeNPy (first 10 values):")  
-		print(f"many_body_eigvals[0,:10]: {many_body_eigvals[0,:10]}")
-		
-		print(f"\nPhysics check - parameters:")
-		print(f"U={U}, V={V}, t={t}, mu={mu}")
-		print(f"Expected: U=0 means no two-body interactions")
 
 		np.testing.assert_array_almost_equal(
 			mb_from_sp_energies[0],
