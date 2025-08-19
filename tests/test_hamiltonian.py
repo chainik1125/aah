@@ -976,9 +976,9 @@ class TestHamiltonian:
 		lattice_points=4
 		cluster_size=2
 		#physical params
-		t = 1.0
+		t = 1e-8
 		U = 0
-		V = 2
+		V = 0
 		mu = 0
 		physical_params=HamiltonianParams(U,V,t,mu)
 
@@ -1041,7 +1041,7 @@ class TestHamiltonian:
 		#physical params
 		t = 1
 		U = 0
-		V = 1
+		V = 2
 		mu = 0
 		physical_params=HamiltonianParams(U,V,t,mu)
 

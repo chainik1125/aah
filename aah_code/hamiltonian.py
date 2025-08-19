@@ -272,13 +272,28 @@ class QuickHubbard1D(CouplingMPOModel):
 			# 		self.add_coupling(V, alpha, 'Cdu', alpha, 'Cu', 2, plus_hc=True)
 
 			if abs(V)>0:
-				
-				str_arr=np.zeros(4)
-				self.add_coupling(str_arr, u, 'Cdd',u, 'Cd',dx, plus_hc=True) #spin-down
-				self.add_coupling_term(V, 0, 2, 'Cdd', 'Cd', plus_hc=True)
-				self.add_coupling_term(V, 0, 2, 'Cdu', 'Cu', plus_hc=True)
-				self.add_coupling_term(V, 1, 3, 'Cdu', 'Cu', plus_hc=True)
-				self.add_coupling_term(V, 1, 3, 'Cdd', 'Cd', plus_hc=True)
+				# NNN hopping V within a 1D Chain (1 site / unit cell)
+				u = 0
+				dx = 2
+
+				shape, shift = self.lat.coupling_shape((dx,))  # authoritative length & shift
+				mask = np.zeros(shape, dtype=float)
+
+				periodic = (self.lat.bc[0] == False)  # TeNPy: False == periodic, True == open
+				left_sites = [0, 1]  # bonds (0->2) and (1->3); replace with [L_start, L_start+1] per cluster
+
+				for i_left in left_sites:
+					idx = (i_left - shift[0]) % shape[0] if periodic else (i_left - shift[0])
+					if periodic or (0 <= idx < shape[0]):   # under OBC, skip bonds that would leave the chain
+						mask[idx] = V
+
+				# spin ↓ and ↑; JW strings are handled automatically
+				self.add_coupling(mask, u, 'Cdd', u, 'Cd', dx, plus_hc=True)
+				self.add_coupling(mask, u, 'Cdu', u, 'Cu', dx, plus_hc=True)
+				# self.add_coupling_term(V, 0, 2, 'Cdd', 'Cd', plus_hc=True)
+				# self.add_coupling_term(V, 0, 2, 'Cdu', 'Cu', plus_hc=True)
+				# self.add_coupling_term(V, 1, 3, 'Cdu', 'Cu', plus_hc=True)
+				# self.add_coupling_term(V, 1, 3, 'Cdd', 'Cd', plus_hc=True)
 		else:
 			raise ValueError("No basis class provided")
 
