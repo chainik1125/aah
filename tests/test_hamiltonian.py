@@ -246,7 +246,7 @@ def get_single_matched(cluster_size,lattice_points,ham_dict_matched_base,state_p
 	return np.array(eigvals), single_particle_hams,matched_clusters
 
 
-def get_single_mismatched(cluster_size,lattice_points,ham_dict_mismatched_base,state_params,physical_params):
+def get_single_mismatched(cluster_size,lattice_points,ham_dict_mismatched_base,state_params,physical_params,get_many_body:bool=False):
 	
 	mismatched_lattice_object=ClusterExperiment(cluster_size,lattice_points,lattice_points//4)
 	mismatch_obj=MismatchedQuick(mismatched_lattice_object,physical_params,V_k_period=lattice_points//2)
@@ -254,6 +254,7 @@ def get_single_mismatched(cluster_size,lattice_points,ham_dict_mismatched_base,s
 	log.debug(f'mismatched_ks shape: {mismatched_ks.shape}')
 	eigvals=[]
 	single_particle_hams=[]
+	many_body_eigvals=[]
 	for k in mismatched_ks:
 		log.debug(f"mismatched k (pi units): {k/np.pi}")
 		sub_cluster_1=LocalClusterBasis(k[0],state_params)
@@ -279,14 +280,44 @@ def get_single_mismatched(cluster_size,lattice_points,ham_dict_mismatched_base,s
 		mismatched_evals,mismatched_evecs=np.linalg.eigh(mismatched_single_particle)
 
 		eigvals.append(mismatched_evals)
-		single_particle_hams.append(mismatched_single_particle)
-	
+		single_particle_hams.append([mismatched_single_particle])
+		if get_many_body:
+			many_body_ham_np=exact_diag.get_numpy_Hamiltonian(mismatched_ham, from_mpo=True)
+			many_body_evals,many_body_evecs=np.linalg.eigh(many_body_ham_np)
+			many_body_eigvals.append(many_body_evals)
 	
 	mismatched_combined_eigvals=np.array(eigvals)
 
 
+	if get_many_body:
+		return mismatched_combined_eigvals,single_particle_hams,mismatched_ks,np.array(many_body_eigvals)
+
 	return mismatched_combined_eigvals,single_particle_hams,mismatched_ks
 
+
+def get_many_body_from_single_particle(single_particle_eigvals,total_particles,spin_projected=True):
+	"""
+	function to get the spectrum for total_particles copies of the single particle eigvals
+	"""
+	
+	#if spin_projected=False, then you assume you have the full spectrum with each spin accounted for.
+	if spin_projected:
+		single_particle_eigvals=np.repeat(single_particle_eigvals,2)
+
+	log.debug(f'single particle eigvals shape: {single_particle_eigvals.shape}')
+			
+	energies = []
+	for k in range(total_particles + 1):
+		# Generate sums directly, avoid storing combinations
+		vals = np.fromiter(
+			(sum(c) for c in itertools.combinations(single_particle_eigvals, k)),
+			dtype=float
+		)
+		#log.debug(f'particle number: {k}, vals shape: {vals.shape}')
+		energies.append(vals)
+	# flatten once at the end
+	energies = np.concatenate(energies)
+	return np.sort(energies)
 
 
 log = logging.getLogger(__name__)
@@ -977,29 +1008,7 @@ class TestHamiltonian:
 
 		log.debug(f'sp eigvals shape: {sp_eigvals_CSD.shape}')
 
-		def get_many_body_from_single_particle(single_particle_eigvals,total_particles,spin_projected=True):
-			"""
-			function to get the spectrum for total_particles copies of the single particle eigvals
-			"""
-			
-			#if spin_projected=False, then you assume you have the full spectrum with each spin accounted for.
-			if spin_projected:
-				single_particle_eigvals=np.repeat(single_particle_eigvals,2)
 
-			log.debug(f'single particle eigvals shape: {single_particle_eigvals.shape}')
-					
-			energies = []
-			for k in range(total_particles + 1):
-				# Generate sums directly, avoid storing combinations
-				vals = np.fromiter(
-					(sum(c) for c in itertools.combinations(single_particle_eigvals, k)),
-					dtype=float
-				)
-				#log.debug(f'particle number: {k}, vals shape: {vals.shape}')
-				energies.append(vals)
-			# flatten once at the end
-			energies = np.concatenate(energies)
-			return np.sort(energies)
 		
 
 		mb_from_sp_energies=np.zeros((sp_eigvals_CSD.shape[0],sp_eigvals_CSD.shape[1],16))
@@ -1016,11 +1025,85 @@ class TestHamiltonian:
 			err_msg="Many Body Reconstruction from single particle failed"
 		)
 		
-		# log.debug(f'mb from sp energies: {mb_from_sp_energies[0]}')
-		# log.debug(f'many body eigvals: {many_body_eigvals}')
 
-		# log.debug(f'test res: {test_res}')
+	def test_general_manybody_sum_single_particle(self):
+		"""
+		A test to check whether the many-body spectrum reduces to a sum of one-particle spectra.
+		TODO: A nice way to write this function would be to feed in the functon which extracts the 
+		single particle block and the lattice parameters as arguments so that you can process it directly.
+		"""
+
+
+		#Initial definitions
+		state_params = StatesParams(spin_states=2)
+		lattice_points=4
+		cluster_size=2
+		#physical params
+		t = 1.0
+		U = 0
+		V = 2
+		mu = 0
+		physical_params=HamiltonianParams(U,V,t,mu)
+
 		
+		#function for making and then extracting the single particle hamiltonian of matched case
+			
+		ham_dict_matched_base = {
+				'V': V,
+				't': t,
+				'mu': mu,
+				'U': U,
+			}
+		
+
+		matched_combined_evals,matched_single_particle_hams,matched_ks,many_body_eigvals=get_single_mismatched(cluster_size,lattice_points,copy.deepcopy(ham_dict_matched_base),state_params,physical_params,True)
+
+		log.debug(f'many body evals shape: {many_body_eigvals.shape}')
+		log.debug(f'matched_combined_evals shape: {matched_combined_evals.shape}')
+		log.debug(f'sp hams length: {matched_single_particle_hams[0][0].shape}')
+		#So note that the many_body_eigvals is [ks,d_sp] and single_particle_hams is k*[d_sp/2] (because you neglect spin.) 
+
+		sp_hams_array_CSDD=np.stack(np.array(matched_single_particle_hams),axis=0)
+
+		log.debug(f'sp hams array shape: {sp_hams_array_CSDD.shape}')
+
+		sp_eigvals_CSD, sp_eigvecs_CSDD = np.linalg.eigh(sp_hams_array_CSDD)
+
+		log.debug(f'sp eigvals shape: {sp_eigvals_CSD.shape}')
+
+
+		
+
+		mb_from_sp_energies=np.zeros((sp_eigvals_CSD.shape[0],sp_eigvals_CSD.shape[1],2**8))
+		
+		for cluster in range(sp_eigvals_CSD.shape[0]):
+			for k in range(sp_eigvals_CSD.shape[1]):
+				mb_from_sp_energies[cluster,k,:]=get_many_body_from_single_particle(sp_eigvals_CSD[cluster,k,:],8,spin_projected=True)
+		
+		log.debug(f'mb from sp energies shape: {mb_from_sp_energies.shape}')
+		log.debug(f'many body evals shape: {many_body_eigvals.shape}')
+		
+		# Debug: print actual values to understand the mismatch
+		print(f"\nDEBUG INFO:")
+		print(f"Single-particle eigenvalues for first cluster, first k:")
+		print(f"Shape: {sp_eigvals_CSD.shape}")
+		print(f"Values: {sp_eigvals_CSD[0, 0, :]}")
+		
+		print(f"\nConstructed many-body spectrum (first 10 values):")
+		print(f"mb_from_sp_energies[0,0,:10]: {mb_from_sp_energies[0,0,:10]}")
+		
+		print(f"\nActual many-body spectrum from TeNPy (first 10 values):")  
+		print(f"many_body_eigvals[0,:10]: {many_body_eigvals[0,:10]}")
+		
+		print(f"\nPhysics check - parameters:")
+		print(f"U={U}, V={V}, t={t}, mu={mu}")
+		print(f"Expected: U=0 means no two-body interactions")
+
+		np.testing.assert_array_almost_equal(
+			mb_from_sp_energies[0],
+			many_body_eigvals,
+			err_msg="Many Body Reconstruction from single particle failed"
+		)
 		
 
 
