@@ -120,6 +120,62 @@ def single_particle_block(model, spin=None, from_mpo=True):
 	return H[np.ix_(keep, keep)]
 
 
+def single_particle_from_terms(model, spin="up"):
+    """
+    Build the 1-particle Hamiltonian A_ij directly from model.{onsite,coupling}_terms.
+
+    spin: 'up' | 'down' | None
+      'up'/'down'  -> L x L for that spin sector
+      None         -> 2L x 2L with block-diagonal (up ⊕ down)
+    """
+    L = model.lat.N_sites
+
+    def collect_for(spin_label):  # 'up' or 'down'
+        A = np.zeros((L, L), dtype=complex)
+
+        # 1) onsite terms -> diagonal entries
+        # onsite_terms is a dict: {category: OnsiteTerms}
+        # OnsiteTerms.onsite_terms is a list of dicts [{opname: strength}, ...] of length L:contentReference[oaicite:6]{index=6}.
+        for _, ons in (model.onsite_terms or {}).items():
+            for i, terms_at_i in enumerate(ons.onsite_terms):
+                for opname, coeff in terms_at_i.items():
+                    if opname == ("Nu" if spin_label == "up" else "Nd"):
+                        A[i, i] += coeff
+                    elif opname == "Ntot":
+                        # contributes equally to both spins
+                        A[i, i] += coeff
+                    # If you ever used 'dN' or custom onsite ops, decide here
+                    # how they should contribute to the single-particle energy.
+
+        # 2) two-site couplings -> off-diagonals
+        # CouplingTerms.coupling_terms is a nested dict
+        # {i: { (op_i, op_string): { j: {op_j: strength} } } } with i<j:contentReference[oaicite:7]{index=7}.
+        want = ("Cdu", "Cu") if spin_label == "up" else ("Cdd", "Cd")
+        for _, cts in (model.coupling_terms or {}).items():
+            for i, left in cts.coupling_terms.items():
+                for (op_i, _op_string), right in left.items():
+                    for j, ops_j in right.items():
+                        for op_j, coeff in ops_j.items():
+                            # hopping c_i^† c_j for the chosen spin
+                            if op_i == want[0] and op_j == want[1]:
+                                A[i, j] += coeff
+                            # plus_hc=True often adds the hermitian partner explicitly; if not, symmetrize later
+                            if op_i == want[1] and op_j == want[0]:
+                                A[j, i] += coeff
+        # Be defensive in case only one direction was added:
+        A = 0.5 * (A + A.T.conj())
+        return A
+
+    if spin is None:
+        A_up   = collect_for("up")
+        A_down = collect_for("down")
+        return np.block([[A_up, np.zeros_like(A_up)],
+                         [np.zeros_like(A_down), A_down]])
+    elif spin in ("up", "down"):
+        return collect_for(spin)
+    else:
+        raise ValueError("spin must be 'up', 'down', or None")
+
 
 def extract_single_particle_hamiltonian(mpo_hamiltonian):
 	"""
@@ -277,6 +333,7 @@ def get_single_mismatched(cluster_size,lattice_points,ham_dict_mismatched_base,s
 
 		mismatched_ham=QuickHubbard1D(ham_dict_mismatched)
 		mismatched_single_particle=single_particle_block(mismatched_ham,spin='up')
+		#mismatched_single_particle=single_particle_from_terms(mismatched_ham,spin='up')
 		mismatched_evals,mismatched_evecs=np.linalg.eigh(mismatched_single_particle)
 
 		eigvals.append(mismatched_evals)
@@ -923,16 +980,7 @@ class TestHamiltonian:
 		log.debug(f'eigvals shape: {matched_combined_evals.shape},mismatched eigvals shape: {mismatched_combined_eigvals.shape}')
 		log.debug(f'eigvals matched: {matched_combined_evals}\n eigvals mismatched: {mismatched_combined_eigvals}')
 
-		try:
-			np.testing.assert_array_almost_equal(
-				matched_combined_evals,
-				mismatched_combined_eigvals,
-				err_msg="Clusters didn't match"
-			)
-			log.info(f"✓ Test PASSED for four site single particle")
-		except AssertionError as e:
-			log.error(f"✗ Test FAILED for four site single particle.")
-			raise AssertionError(f"Energy mismatch for four site single particle") from e	
+
 
 		
 		#return None
@@ -960,6 +1008,18 @@ class TestHamiltonian:
 
 		log.debug(f'matched spectrum: {matched_combined_evals.round(2)}')
 		log.debug(f'mismatched spectrum: {mismatched_combined_eigvals.round(2)}')
+
+
+		try:
+			np.testing.assert_array_almost_equal(
+				matched_combined_evals,
+				mismatched_combined_eigvals,
+				err_msg="Clusters didn't match"
+			)
+			log.info(f"✓ Test PASSED for four site single particle")
+		except AssertionError as e:
+			log.error(f"✗ Test FAILED for four site single particle.")
+			raise AssertionError(f"Energy mismatch for four site single particle") from e	
 
 		return None
 	

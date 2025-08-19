@@ -153,16 +153,20 @@ class QuickHubbard1D(CouplingMPOModel):
 		if 'basis_classes' in model_params:
 			# Use the total system size L instead of just the first basis class
 			L = model_params['L'] # total system size
-			bc = 'periodic'  # periodic boundary conditions
-			bc_MPS = 'finite'  # finite MPS
+			#bc = 'periodic'  # periodic boundary conditions
+			#bc_MPS = 'finite'  # finite MPS
+			bc='open'
+			bc_MPS='finite'
 			lat = lattice.Chain(L=L, bc=bc, bc_MPS=bc_MPS, site=self.init_sites(model_params))
 			# Keep periodic boundary conditions for V coupling
-			lat.bc = [True]
+			#lat.bc = [True]
 		else:
 			
 			L = model_params['L'] # size
-			bc = 'periodic'  # always use 'open'
-			bc_MPS = 'finite'  # 'infinite' does iDMRG (still use open in 'bc')
+			#bc = 'periodic'  # always use 'open'
+			#bc_MPS = 'finite'  # 'infinite' does iDMRG (still use open in 'bc')
+			bc='open'
+			bc_MPS='finite'
 			lat = lattice.Chain(L=L, bc=bc, bc_MPS=bc_MPS, site=self.init_sites(model_params))
 
 			raise Warning("No basis class provided - using default chain with period chain bc and finite MPS ")
@@ -197,7 +201,7 @@ class QuickHubbard1D(CouplingMPOModel):
 					for site_idx in range(L_start, L_end):
 						#self.add_onsite(-mu_eff/4, alpha, 'Nu', site_idx)  # chemical potential n_up
 						#self.add_onsite(-mu_eff/4, alpha, 'Nd', site_idx)  # chemical potential n_down
-						#TODO:change to add_onsite if simple
+						#TODO:change to add_onsite
 						self.add_onsite_term(-mu_eff, site_idx, 'Nu')
 						self.add_onsite_term(-mu_eff, site_idx, 'Nd')
 			
@@ -296,6 +300,34 @@ class QuickHubbard1D(CouplingMPOModel):
 				# self.add_coupling_term(V, 1, 3, 'Cdd', 'Cd', plus_hc=True)
 		else:
 			raise ValueError("No basis class provided")
+		
+		print("lat.bc (False=periodic, True=open):", self.lat.bc)
+		print("dx=1 shape/shift:", self.lat.coupling_shape((1,)))
+		print("dx=2 shape/shift:", self.lat.coupling_shape((2,)))
+
+		
+		def bonds(self, dx):
+			# dx must be a tuple for TeNPy (1D chain -> (dx,))
+			dx_t = (dx,)
+			shape, shift = self.lat.coupling_shape(dx_t)   # authoritative length & shift
+			strength = np.ones(shape, dtype=float)         # match coupling_shape exactly
+			i, j, _ = self.lat.possible_couplings(0, 0, dx_t, strength)
+			return list(zip(i, j))
+
+		print("NN bonds (dx=1):", bonds(self, 1))
+		print("NNN bonds (dx=2):", bonds(self, 2))
+
+		def active_bonds(self, dx, mask):
+			dx_t = (dx,)
+			i, j, vals = self.lat.possible_couplings(0, 0, dx_t, mask)
+			return [(int(a), int(b)) for a, b, v in zip(i, j, vals) if abs(v) > 1e-15]
+
+		# example: mask with a single NN bond at i_left
+		dx = 1
+		shape, shift = self.lat.coupling_shape((dx,))
+		mask = np.zeros(shape); mask[i_left - shift[0]] = t_tilde  # OBC indexing
+		print("NN bonds actually added:", active_bonds(self, dx, mask))
+		#raise ValueError('debug')
 
 class SpectrumSolver():
 	"""
