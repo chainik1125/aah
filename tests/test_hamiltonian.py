@@ -1039,9 +1039,9 @@ class TestHamiltonian:
 		lattice_points=4
 		cluster_size=2
 		#physical params
-		t = 1.0
+		t = 1
 		U = 0
-		V = 2
+		V = 1
 		mu = 0
 		physical_params=HamiltonianParams(U,V,t,mu)
 
@@ -1085,6 +1085,9 @@ class TestHamiltonian:
 		
 		# Debug: print actual values to understand the mismatch
 		
+		log.debug(f'mb from sp energies: {mb_from_sp_energies[0][:4]}')
+		log.debug(f'many body evals: {many_body_eigvals[:4]}')
+
 
 		np.testing.assert_array_almost_equal(
 			mb_from_sp_energies[0],
