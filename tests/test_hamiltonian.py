@@ -5,7 +5,7 @@ from aah_code.basis import LocalClusterBasis
 from aah_code.hamiltonian import Hubbard1D, FullSpectrum, inspect_hamiltonian_terms
 from aah_code.hamiltonian import QuickHubbard1D, get_spectra, MismatchedQuick
 from aah_code.global_params import StatesParams, HamiltonianParams
-
+from aah_code.test_utils import assert_free_fermion_consistency,debug_free_fermion,check_number_conservation,per_N_compare,per_N_mismatch_report, build_free_H_from_A,residual_in_N2,fit_R_as_density_like, scan_for_correlated_hopping
 
 
 import tenpy as tp
@@ -332,6 +332,17 @@ def get_single_mismatched(cluster_size,lattice_points,ham_dict_mismatched_base,s
 		log.debug(f'ham dict mismatched:\n {ham_dict_mismatched}')
 
 		mismatched_ham=QuickHubbard1D(ham_dict_mismatched)
+		#assert_free_fermion_consistency(mismatched_ham)
+		check_number_conservation(mismatched_ham)
+		#build_free_H_from_A(mismatched_ham)
+		# per_N_mismatch_report(mismatched_ham)
+		#R, N2, HN2, HfreeN2 = residual_in_N2(mismatched_ham)
+		#fit_R_as_density_like(mismatched_ham,R,N2)
+		
+		
+		hits=scan_for_correlated_hopping(mismatched_ham)
+		print("correlated-hopping like terms found:", hits)
+		raise ValueError('debugging - inside single mismatched')
 		mismatched_single_particle=single_particle_block(mismatched_ham,spin='up')
 		#mismatched_single_particle=single_particle_from_terms(mismatched_ham,spin='up')
 		mismatched_evals,mismatched_evecs=np.linalg.eigh(mismatched_single_particle)
@@ -375,6 +386,31 @@ def get_many_body_from_single_particle(single_particle_eigvals,total_particles,s
 	# flatten once at the end
 	energies = np.concatenate(energies)
 	return np.sort(energies)
+
+
+def A_from_terms(model, spin="up"):
+    L = model.lat.N_sites
+    A = np.zeros((L, L), complex)
+    want = ("Cdu","Cu") if spin=="up" else ("Cdd","Cd")
+
+    # onsite → diagonal
+    for _, ons in (model.onsite_terms or {}).items():
+        for i, terms_i in enumerate(ons.onsite_terms):
+            if "Nu" in terms_i and spin=="up":   A[i,i] += terms_i["Nu"]
+            if "Nd" in terms_i and spin=="down": A[i,i] += terms_i["Nd"]
+            if "Ntot" in terms_i:                A[i,i] += terms_i["Ntot"]
+
+    # two-site hoppings → off-diagonals
+    for _, cts in (model.coupling_terms or {}).items():
+        for i, left in cts.coupling_terms.items():
+            for (op_i, _), right in left.items():
+                for j, ops_j in right.items():
+                    if op_i == want[0] and want[1] in ops_j: A[i,j] += ops_j[want[1]]
+                    if op_i == want[1] and want[0] in ops_j: A[j,i] += ops_j[want[0]]
+    # in case only one direction was present
+    return 0.5*(A + A.T.conj())
+
+
 
 
 log = logging.getLogger(__name__)

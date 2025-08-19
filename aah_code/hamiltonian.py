@@ -197,13 +197,13 @@ class QuickHubbard1D(CouplingMPOModel):
 				mu_eff=mu_0-mu_tilde
 
 				
-				for alpha in range(len(self.lat.unit_cell)):
-					for site_idx in range(L_start, L_end):
-						#self.add_onsite(-mu_eff/4, alpha, 'Nu', site_idx)  # chemical potential n_up
-						#self.add_onsite(-mu_eff/4, alpha, 'Nd', site_idx)  # chemical potential n_down
-						#TODO:change to add_onsite
-						self.add_onsite_term(-mu_eff, site_idx, 'Nu')
-						self.add_onsite_term(-mu_eff, site_idx, 'Nd')
+				# for alpha in range(len(self.lat.unit_cell)):
+				# 	for site_idx in range(L_start, L_end):
+				# 		#self.add_onsite(-mu_eff/4, alpha, 'Nu', site_idx)  # chemical potential n_up
+				# 		#self.add_onsite(-mu_eff/4, alpha, 'Nd', site_idx)  # chemical potential n_down
+				# 		#TODO:change to add_onsite
+				# 		self.add_onsite_term(-mu_eff, site_idx, 'Nu')
+				# 		self.add_onsite_term(-mu_eff, site_idx, 'Nd')
 			
 				#Add the t_tilde term
 
@@ -277,56 +277,62 @@ class QuickHubbard1D(CouplingMPOModel):
 
 			if abs(V)>0:
 				# NNN hopping V within a 1D Chain (1 site / unit cell)
-				u = 0
-				dx = 2
+				# u = 0
+				# dx = 2
 
-				shape, shift = self.lat.coupling_shape((dx,))  # authoritative length & shift
-				mask = np.zeros(shape, dtype=float)
+				# shape, shift = self.lat.coupling_shape((dx,))  # authoritative length & shift
+				# mask = np.zeros(shape, dtype=float)
 
-				periodic = (self.lat.bc[0] == False)  # TeNPy: False == periodic, True == open
-				left_sites = [0, 1]  # bonds (0->2) and (1->3); replace with [L_start, L_start+1] per cluster
+				# periodic = (self.lat.bc[0] == False)  # TeNPy: False == periodic, True == open
+				# left_sites = [0, 1]  # bonds (0->2) and (1->3); replace with [L_start, L_start+1] per cluster
 
-				for i_left in left_sites:
-					idx = (i_left - shift[0]) % shape[0] if periodic else (i_left - shift[0])
-					if periodic or (0 <= idx < shape[0]):   # under OBC, skip bonds that would leave the chain
-						mask[idx] = V
+				# for i_left in left_sites:
+				# 	idx = (i_left - shift[0]) % shape[0] if periodic else (i_left - shift[0])
+				# 	if periodic or (0 <= idx < shape[0]):   # under OBC, skip bonds that would leave the chain
+				# 		mask[idx] = V
 
-				# spin ↓ and ↑; JW strings are handled automatically
-				self.add_coupling(mask, u, 'Cdd', u, 'Cd', dx, plus_hc=True)
-				self.add_coupling(mask, u, 'Cdu', u, 'Cu', dx, plus_hc=True)
+				# # spin ↓ and ↑; JW strings are handled automatically
+				# self.add_coupling(mask, u, 'Cdd', u, 'Cd', dx, plus_hc=True)
+				# self.add_coupling(mask, u, 'Cdu', u, 'Cu', dx, plus_hc=True)
+
+
 				# self.add_coupling_term(V, 0, 2, 'Cdd', 'Cd', plus_hc=True)
 				# self.add_coupling_term(V, 0, 2, 'Cdu', 'Cu', plus_hc=True)
 				# self.add_coupling_term(V, 1, 3, 'Cdu', 'Cu', plus_hc=True)
 				# self.add_coupling_term(V, 1, 3, 'Cdd', 'Cd', plus_hc=True)
+
+				self.add_coupling(V,0,'Cdd',0,'Cd',2,plus_hc=True)
+				self.add_coupling(V,0,'Cdu',0,'Cu',2,plus_hc=True)
+				
 		else:
 			raise ValueError("No basis class provided")
 		
-		print("lat.bc (False=periodic, True=open):", self.lat.bc)
-		print("dx=1 shape/shift:", self.lat.coupling_shape((1,)))
-		print("dx=2 shape/shift:", self.lat.coupling_shape((2,)))
+		# print("lat.bc (False=periodic, True=open):", self.lat.bc)
+		# print("dx=1 shape/shift:", self.lat.coupling_shape((1,)))
+		# print("dx=2 shape/shift:", self.lat.coupling_shape((2,)))
 
 		
-		def bonds(self, dx):
-			# dx must be a tuple for TeNPy (1D chain -> (dx,))
-			dx_t = (dx,)
-			shape, shift = self.lat.coupling_shape(dx_t)   # authoritative length & shift
-			strength = np.ones(shape, dtype=float)         # match coupling_shape exactly
-			i, j, _ = self.lat.possible_couplings(0, 0, dx_t, strength)
-			return list(zip(i, j))
+		# def bonds(self, dx):
+		# 	# dx must be a tuple for TeNPy (1D chain -> (dx,))
+		# 	dx_t = (dx,)
+		# 	shape, shift = self.lat.coupling_shape(dx_t)   # authoritative length & shift
+		# 	strength = np.ones(shape, dtype=float)         # match coupling_shape exactly
+		# 	i, j, _ = self.lat.possible_couplings(0, 0, dx_t, strength)
+		# 	return list(zip(i, j))
 
-		print("NN bonds (dx=1):", bonds(self, 1))
-		print("NNN bonds (dx=2):", bonds(self, 2))
+		# print("NN bonds (dx=1):", bonds(self, 1))
+		# print("NNN bonds (dx=2):", bonds(self, 2))
 
-		def active_bonds(self, dx, mask):
-			dx_t = (dx,)
-			i, j, vals = self.lat.possible_couplings(0, 0, dx_t, mask)
-			return [(int(a), int(b)) for a, b, v in zip(i, j, vals) if abs(v) > 1e-15]
+		# def active_bonds(self, dx, mask):
+		# 	dx_t = (dx,)
+		# 	i, j, vals = self.lat.possible_couplings(0, 0, dx_t, mask)
+		# 	return [(int(a), int(b)) for a, b, v in zip(i, j, vals) if abs(v) > 1e-15]
 
-		# example: mask with a single NN bond at i_left
-		dx = 1
-		shape, shift = self.lat.coupling_shape((dx,))
-		mask = np.zeros(shape); mask[i_left - shift[0]] = t_tilde  # OBC indexing
-		print("NN bonds actually added:", active_bonds(self, dx, mask))
+		# # example: mask with a single NN bond at i_left
+		# dx = 1
+		# shape, shift = self.lat.coupling_shape((dx,))
+		# mask = np.zeros(shape); mask[i_left - shift[0]] = t_tilde  # OBC indexing
+		# print("NN bonds actually added:", active_bonds(self, dx, mask))
 		#raise ValueError('debug')
 
 class SpectrumSolver():
