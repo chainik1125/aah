@@ -197,7 +197,7 @@ class QuickHubbard1D(CouplingMPOModel):
 					for site_idx in range(L_start, L_end):
 						#self.add_onsite(-mu_eff/4, alpha, 'Nu', site_idx)  # chemical potential n_up
 						#self.add_onsite(-mu_eff/4, alpha, 'Nd', site_idx)  # chemical potential n_down
-
+						#TODO:change to add_onsite if simple
 						self.add_onsite_term(-mu_eff, site_idx, 'Nu')
 						self.add_onsite_term(-mu_eff, site_idx, 'Nd')
 			
@@ -227,9 +227,30 @@ class QuickHubbard1D(CouplingMPOModel):
 						#NOTE!IMPORTANT!: here you are only adding once, so you dont need to halve
 						#so to correct you should mutiply t_tilde by 2
 						# Add hopping between the two sites in this cluster: L_start <--> L_start+1
+						#OK, temporary caveman way to add a single bond
 						i1, i2 = L_start, L_start + 1
-						self.add_coupling_term(2*t_tilde, i1, i2, 'Cdd', 'Cd', plus_hc=True)
-						self.add_coupling_term(2*t_tilde, i1, i2, 'Cdu', 'Cu', plus_hc=True)
+						dx=1
+						u=0 #the sublattice
+
+						# n_cells=L_cells-1 #This is from the periodic case - TODO: change this to automatical
+						
+						# str_arr=np.zeros(n_cells,dtype=float)
+						# str_arr[i1]=2*t_tilde
+
+
+						shape, shift = self.lat.coupling_shape((dx,))  # authoritative length & shift
+						str_arr = np.zeros(shape, dtype=float)
+						#periodic if bc[0] == False
+						periodic = (self.lat.bc[0] == False)
+						idx = (i1 - shift[0]) % shape[0] if periodic else (i1 - shift[0])
+						if not periodic and not (0 <= idx < shape[0]):
+							raise ValueError("bond would leave chain under OBC")
+
+						str_arr[idx]=2*t_tilde
+						
+						
+						self.add_coupling(str_arr, u, 'Cdd',u, 'Cd',dx, plus_hc=True) #spin-down
+						self.add_coupling(str_arr, u, 'Cdu',u, 'Cu',dx, plus_hc=True) #spin-up
 				
 				
 				
@@ -251,6 +272,9 @@ class QuickHubbard1D(CouplingMPOModel):
 			# 		self.add_coupling(V, alpha, 'Cdu', alpha, 'Cu', 2, plus_hc=True)
 
 			if abs(V)>0:
+				
+				str_arr=np.zeros(4)
+				self.add_coupling(str_arr, u, 'Cdd',u, 'Cd',dx, plus_hc=True) #spin-down
 				self.add_coupling_term(V, 0, 2, 'Cdd', 'Cd', plus_hc=True)
 				self.add_coupling_term(V, 0, 2, 'Cdu', 'Cu', plus_hc=True)
 				self.add_coupling_term(V, 1, 3, 'Cdu', 'Cu', plus_hc=True)
