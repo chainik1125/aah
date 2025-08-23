@@ -1145,7 +1145,8 @@ class TestHamiltonian:
 		#function for making and then extracting the single particle hamiltonian of matched case
 			
 		ham_dict_matched_base = {
-				'V': V,
+				#'V': V,
+				'V':V,
 				't': t,
 				'mu': mu,
 				'U': U,
