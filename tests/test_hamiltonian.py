@@ -5,6 +5,7 @@ from aah_code.basis import LocalClusterBasis
 from aah_code.hamiltonian import Hubbard1D, FullSpectrum, inspect_hamiltonian_terms
 from aah_code.hamiltonian import QuickHubbard1D, get_spectra, MismatchedQuick
 from aah_code.global_params import StatesParams, HamiltonianParams
+from aah_code.trial_ham import ExtendedFermiHubbard1D,test_hub,Hubbard1D_NN_NNN
 
 
 
@@ -331,7 +332,11 @@ def get_single_mismatched(cluster_size,lattice_points,ham_dict_mismatched_base,s
 
 		log.debug(f'ham dict mismatched:\n {ham_dict_mismatched}')
 
-		mismatched_ham=QuickHubbard1D(ham_dict_mismatched)
+		ham_dict_mismatched['t2']=2
+
+		mismatched_ham=Hubbard1D_NN_NNN(ham_dict_mismatched)
+		
+		
 		mismatched_single_particle=single_particle_block(mismatched_ham,spin='up')
 		#mismatched_single_particle=single_particle_from_terms(mismatched_ham,spin='up')
 		mismatched_evals,mismatched_evecs=np.linalg.eigh(mismatched_single_particle)
@@ -1109,7 +1114,8 @@ class TestHamiltonian:
 		#function for making and then extracting the single particle hamiltonian of matched case
 			
 		ham_dict_matched_base = {
-				'V': V,
+				#'V': V,
+				'V':V,
 				't': t,
 				'mu': mu,
 				'U': U,

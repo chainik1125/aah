@@ -288,106 +288,11 @@ class TTprimeSpinfulChain(CouplingMPOModel):
 
 
 
-from tenpy.models.hubbard import FermiHubbardModel
-
-class TtprimeHubbard(FermiHubbardModel):
-    """Spin-1/2 Hubbard chain with NN hop t (from parent) + NNN hop t' (added here)."""
-    def init_terms(self, p):
-        # Parent adds onsite U, -mu*Ntot, and NN hopping -t * sum_sigma (c†_{iσ} c_{i+1,σ} + h.c.)
-        super().init_terms(p)
-
-        tp = float(p.get("tp", 0.0))
-        if abs(tp) == 0.0:
-            return
-
-        # Add NNN hopping: -t' * sum_sigma (c†_{iσ} c_{i+2,σ} + h.c.)
-        # Use categories so you can inspect terms later.
-        for u1, u2, dx in self.lat.pairs.get('next_nearest_neighbors', []):
-            self.add_coupling(-tp, u1, "Cdu", u2, "Cu", dx, plus_hc=True, category="tprime_up")
-            self.add_coupling(-tp, u1, "Cdd", u2, "Cd", dx, plus_hc=True, category="tprime_dn")
 
 
-# Example
-from tenpy.models.model import CouplingMPOModel
-from tenpy.models.lattice import Chain
-from tenpy.networks.site import SpinHalfFermionSite
-
-class FreeTtPrimeSpinful(CouplingMPOModel):
-    """Spin-1/2 electrons with NN hop t and NNN hop t' (quadratic; optional U if you want)."""
-
-    def init_lattice(self, p):
-        L  = int(p["L"])
-        bc = p.get("bc", "open")                  # "open" or "periodic"
-        site = SpinHalfFermionSite(
-            cons_N=p.get("cons_N", "N"),
-            cons_Sz=p.get("cons_Sz", "Sz")
-        )
-        return Chain(L=L, site=site, bc=bc)       # don't touch self.sites here
-
-    def init_terms(self, p):
-        t  = float(p.get("t", 1.0))
-        tp = float(p.get("tp", 0.0))
-        mu = float(p.get("mu", 0.0))
-        U  = float(p.get("U", 0.0))               # keep 0.0 while testing free-fermion sum
-
-        # onsite: -mu (n_up + n_dn); optional Hubbard U
-        self.add_onsite(-mu, 0, "Ntot")
-        if U != 0.0:
-            self.add_onsite(U, 0, "NuNd")
-
-        # To avoid double counting, only add bonds with dx>0; plus_hc=True adds the reverse.
-        # NN: -t * sum_sigma (c^†_{iσ} c_{i+1,σ} + h.c.)
-        for u1, u2, dx in self.lat.pairs["nearest_neighbors"]:
-            if dx[0] > 0:
-                self.add_coupling(-t,  u1, "Cdu", u2, "Cu", dx, plus_hc=True)
-                self.add_coupling(-t,  u1, "Cdd", u2, "Cd", dx, plus_hc=True)
-
-        # NNN: -t' * sum_sigma (c^†_{iσ} c_{i+2,σ} + h.c.)
-        for u1, u2, dx in self.lat.pairs.get("next_nearest_neighbors", []):
-            if dx[0] > 0:
-                self.add_coupling(-tp, u1, "Cdu", u2, "Cu", dx, plus_hc=True)
-                self.add_coupling(-tp, u1, "Cdd", u2, "Cd", dx, plus_hc=True)
-
-
-def single_particle_tb_from_params(L, t, tp, mu=0.0, bc="open"):
-    """Spin-degenerate 1p Hamiltonian for a 1D chain with NN t and NNN t'."""
-    H = -mu * np.eye(L, dtype=float)
-
-    # NN
-    for i in range(L - 1):
-        H[i, i+1] += -t
-        H[i+1, i] += -t
-
-    # NNN
-    for i in range(L - 2):
-        H[i, i+2] += -tp
-        H[i+2, i] += -tp
-
-    if bc == "periodic":
-        # NN wrap
-        H[0, L-1] += -t
-        H[L-1, 0] += -t
-        # NNN wraps: (0 <-> L-2) and (1 <-> L-1)
-        H[0, L-2] += -tp
-        H[L-2, 0] += -tp
-        H[1, L-1] += -tp
-        H[L-1, 1] += -tp
-
-    return H
 
 if __name__ == "__main__":
-	print('main char')
-	  
-	#create an instance of the many body hamiltonian
-	  
-	# ham_dict={
-	#         'L':4,
-	# 		't':1,
-	#         'V':2,
-	#     	'mu':0,
-	#         'U':0
-	# }
-	#ham_dict = {'L': 4, 't': 1, 'V': 2, 'mu': 0, 'U': 0, 'bc': 'open', 'bc_MPS': 'finite'}
+	
 	
 	ham_dict = {
     "L":  4,
@@ -399,16 +304,9 @@ if __name__ == "__main__":
 		}
 	
 	
-	ham=FreeTtPrimeSpinful(ham_dict)
+	ham=TTprimeSpinfulChain(ham_dict)
 	
-
-	L   = ham.lat.N_sites            # or ham.lat.L
-	t   = ham_dict["t"]
-	tp  = ham_dict.get("tp", 0.0)
-	mu  = ham_dict.get("mu", 0.0)
-	bc  = ham_dict.get("bc", "open")
-
-	sp_ham = single_particle_tb_from_params(L, t, tp, mu, bc)
+	sp_ham=single_particle_projected(ham,spin_block='up')
 
 	# eigenvalues (spin-degenerate)
 	sp_evals, _ = np.linalg.eigh(sp_ham)
