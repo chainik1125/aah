@@ -2,6 +2,12 @@ import numpy as np
 import itertools
 from quspin.basis import spinful_fermion_basis_1d
 from quspin.operators import hamiltonian
+from aah_code.hamiltonian import Hubbard1D
+from aah_code.hamiltonian import FullSpectrum
+from aah_code.basis import LocalClusterBasis
+from aah_code.global_params import StatesParams,HamiltonianParams
+from aah_code.quspin.quspin_hamiltonian import QuSpinHamiltonian
+
 
 
 def quspin_t_tprime_chain(L, t, tp, mu=0.0, U=0.0, bc="open"):
@@ -56,7 +62,49 @@ def single_particle_tb_from_params(L, t, tp, mu=0.0, bc="open"):
     return H
 
 
+def check_quspin_vs_tenpy_pi_pi():
+    cluster_k=np.array([[-np.pi],[0]])
+    state_params=StatesParams(spin_states=2)
+    cluster_object=LocalClusterBasis(cluster_k,state_params)
+    L=2
+    t=1.0
+    V=2.0
+    U=0
+    mu=0
+    mu_0=0
+    physical_params=HamiltonianParams(U=U, V=V, hopping=t, mu_0=mu_0)
+    ham_dict={'L':L,'t':t,'V':V,'U':U,'mu':mu,'basis_class':cluster_object}
+
+    ham_obj=QuSpinHamiltonian(ham_dict)
+    test_ham,test_basis=ham_obj.create_pi_V_pi_int_ham()
+    print(f'test_ham shape: {test_ham.shape}')
+    eigvals=np.linalg.eigvalsh(test_ham.toarray())
+    
+
+    #ten_ham=Hubbard1D(ham_dict)
+    
+    full_spectrum_object = FullSpectrum(np.array([cluster_k]), state_params, physical_params,ham_lib='tenpy')
+    k_points,energy_spectrum,number_spectrum,spin_spectrum=full_spectrum_object.get_full_spectrum()
+    
+    print(f'energy_spectrum shape: {energy_spectrum.shape}')
+
+    try:
+        np.testing.assert_allclose(eigvals,energy_spectrum[0],atol=1e-12,err_msg='eigvals and energy_spectrum do not match')
+        print("✅ Tenpy gives the same eigvals as QuSpin for pi modulation, pi cluster")
+    except AssertionError as e:
+        print("❌ Test failed:", e)
+
+    return np.testing.assert_allclose(eigvals,energy_spectrum[0],atol=1e-12,err_msg='eigvals and energy_spectrum do not match')
+    
+    
+
 if __name__ == "__main__":
+
+
+    check_quspin_vs_tenpy_pi_pi()
+
+    exit('testing complete')
+
     # ----- params -----
     L  = 4
     t  = 1.0

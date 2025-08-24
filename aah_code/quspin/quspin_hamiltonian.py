@@ -8,6 +8,11 @@ import matplotlib.pyplot as plt
 from quspin.operators import hamiltonian, quantum_operator
 from quspin.basis import spinful_fermion_basis_1d
 from itertools import combinations
+from aah_code.utils import mu_tilde_coefficient
+from aah_code.basis import LocalClusterBasis
+# from aah_code.global_params import StatesParams,HamiltonianParams
+# from aah_code.hamiltonian import FullSpectrum
+# from aah_code.hamiltonian import Hubbard1D
 
 
 def create_single_particle_hamiltonian(L, t1, t2):
@@ -331,10 +336,6 @@ def plot_spectrum_comparison(mb_energies, expected_energies, sp_energies, n_part
     plt.show()
 
 
-import numpy as np
-from quspin.basis import spinful_fermion_basis_1d
-from quspin.operators import hamiltonian
-
 def hubbard_1d(
     L,
     t=1.0,
@@ -407,7 +408,115 @@ def analytic_nonint_gs_energy(L,t,V,mu):
     E_tot=np.sum(E_occ)
     return E_tot
 
+
+def hubbard_V_pi_int_pi(ham_dict:dict,bc="periodic",Nf=None,double_occupancy=True,dtype=np.float64):
+    """
+    Construct the matched case for pi modulation in V
+    (which becomes just alternating potential in new basis)
+    and pi modulation in U (diagonal in new basis)
+
+
+    Construct H = t_tilde * Σ_{⟨i,j⟩,σ} (c†_{iσ} c_{jσ} + h.c.)
+                   + U * Σ_i n_{i↑} n_{i↓}
+                   - μ_tilde * Σ_i (n_{i↑} + n_{i↓})
+
+    Returns
+    -------
+    H : quspin.operators.hamiltonian
+    basis : quspin.basis.spinful_fermion_basis_1d
+    """
+    # basis over spin-↑ and spin-↓ fermions; Nf fixes (N_up, N_down) sector if given
+    L=ham_dict['L']
+    t_0=ham_dict['t']
+    V=ham_dict['V']
+    U=ham_dict['U']
+    mu_0=ham_dict['mu']
+    basis_object=ham_dict['basis_class']
+
+
+    basis = spinful_fermion_basis_1d(
+        L,
+        Nf=Nf,
+        double_occupancy=double_occupancy,
+    )
+
+    # nearest-neighbor bonds
+    if bc == "periodic":
+        bonds_NN = [(i, (i + 1) % L) for i in range(L)]
+        # bonds_NNN = [(i, (i + 2) % L) for i in range(L)]
+    elif bc == "open":
+        bonds_NN = [(i, i + 1) for i in range(L - 1)]
+        # bonds_NNN = [(i, i + 2) for i in range(L - 2)]
+    else:
+        raise ValueError("bc must be 'open' or 'periodic'")
+    
+    def get_t_tilde(t_0,basis_object,dx=1):
+        cluster_k_points=basis_object.cluster_k_points
+        #There are two factor of 1/2:
+        #1. Comes from the 1/2 in the t_tilde definition
+        #2. Comes from double counting when including the hc - if you get confused about
+        # this again remember the two site model hopping eigenenergies are not \pm 2t but \pm t !
+        cluster_size=cluster_k_points.shape[0]
+        
+        
+        t_tilde=(1/2)*(1/cluster_size)*np.array([2*t_0*np.cos(cluster_k_points[j])*(1/2)*2*t_0*np.cos(dx*2*np.pi*j/cluster_size) for j in range(cluster_size)]).sum()
+        
+        return t_tilde
+    
+    def get_mu_tilde(t_0,basis_object):
+        mu_tilde=mu_tilde_coefficient(t_0,basis_object)
+        return mu_tilde
+
+    # Site-coupling lists: [coef, i, j] for two-site ops; [coef, i] for one-site ops
+    t_tilde=get_t_tilde(t_0,basis_object)
+    hop_NN_pm = [[t_tilde, i, j] for (i, j) in bonds_NN]  # "+-" terms (c†_i c_j)
+    hop_NN_mp = [[-t_tilde, i, j] for (i, j) in bonds_NN]  # "-+" terms (c_i c†_j)
+    # hop_NNN_pm = [[V, i, j] for (i, j) in bonds_NNN]  # "+-" terms (c†_i c_j)
+    # hop_NNN_mp = [[-V, i, j] for (i, j) in bonds_NNN]  # "-+" terms (c_i c†_j)
+    #Onsite terms:
+    U_list = [[U, i, i] for i in range(L)]     # "n|n" acts on same site i
+    mu_tilde=get_mu_tilde(t_0,basis_object)
+    mu_eff=mu_0-mu_tilde
+    mu_list = [[-mu_eff, i] for i in range(L)]     # -μ(n_up + n_down)
+
+    #Add alternativing V term:
+    V_list=[[V*(-1)**i,i] for i in range(L)]
+
+    # spinful opstrings use a pipe: "op_up|op_down"
+    static = [
+        ["+-|", hop_NN_pm],  # ↑ hopping
+        ["-+|", hop_NN_mp],
+        #["+-|", hop_NNN_pm],
+        # ["-+|", hop_NNN_mp],
+        ["|+-", hop_NN_pm],  # ↓ hopping
+        ["|-+", hop_NN_mp],
+        # ["|+-", hop_NNN_pm],
+        # ["|-+", hop_NNN_mp],
+        ["n|n", U_list],  # on-site Hubbard U
+        ["n|",  mu_list], # chemical potential ↑
+        ["|n",  mu_list], # chemical potential ↓
+        ["n|",  V_list], # alternating potential ↑
+        ["|n",  V_list], # alternating potential ↓
+    ]
+
+    H = hamiltonian(static, [], basis=basis, dtype=dtype)
+    return H, basis
+
+
+
+class QuSpinHamiltonian():
+    def __init__(self,ham_dict:dict):
+        self.ham_dict=ham_dict
+
+    def create_pi_V_pi_int_ham(self):
+        ham=hubbard_V_pi_int_pi(self.ham_dict)
+        return ham    
+    
 if __name__ == "__main__":
+   
+    
+    
+
     L=4
     t=1.0
     V=2.0

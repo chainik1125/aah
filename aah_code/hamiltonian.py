@@ -22,6 +22,7 @@ from plotly.subplots import make_subplots
 import plotly.io as pio
 from tenpy.networks import mps
 from tqdm import tqdm
+from aah_code.quspin.quspin_hamiltonian import create_quspin_hamiltonian
 
 from aah_code.real_space_dmrg import run_dmrg_method, get_gnd_infinite,get_gnd
 # Set Plotly to use browser renderer to avoid nbformat issues
@@ -340,18 +341,16 @@ class SpectrumSolver():
 	Class that will solve for the spectrum
 	save: either false or folder path
 	"""
-	def __init__(self,hamiltonian,cluster_object:LocalClusterBasis,solver:str='tenpy_ED',states_retained:Union[int,'all']='all',save:Union[bool,str]=False):
+	def __init__(self,hamiltonian,cluster_object:LocalClusterBasis,ham_lib:str='tenpy',states_retained:Union[int,'all']='all',save:Union[bool,str]=False):
 		self.hamiltonian=hamiltonian
-		self.solver=solver
 		self.states_retained=states_retained
 		self.cluster_object=cluster_object
 		self.save=save
+		self.ham_lib=ham_lib
 
 	def solve_spectrum(self):
-		if self.solver=='tenpy_ED':
+		if self.ham_lib=='tenpy':
 			#np_ham=tp.algorithms.exact_diag.get_numpy_Hamiltonian(self.hamiltonian)
-			
-			
 			ed = exact_diag.ExactDiag(self.hamiltonian)                 # solver instance  :contentReference[oaicite:0]{index=0}
 			
 			# Use MPO-based exact diagonalization to handle next-nearest neighbor couplings
@@ -361,8 +360,6 @@ class SpectrumSolver():
 			V = ed.V
 			#E0, psi_vec = ed.groundstate()
 			#
-			
-			
 			eigvals=[]
 			eigvecs=[]
 			n_ups=[]
@@ -383,8 +380,14 @@ class SpectrumSolver():
 			return eigvals,eigvecs,n_ups,n_downs,n_tot
 			#TODO:add functionality to efficiently get smaller number of total states.
 
+		elif self.ham_lib=='quspin':
+			raise ValueError('Am implementing quspin, not ready yet, just placeholders below')
+			ed_ham=create_quspin_hamiltonian(self.hamiltonian)
+			ed_ham.eigvalsh()
+			return ed_ham.eigvalsh()
 		else:
-			raise ValueError(f'Solver {self.solver} not implemented yet')
+
+			raise ValueError(f'Solver {self.ham_lib} not implemented yet')
 	
 		
 #Maybe I'll leave this for later
@@ -395,11 +398,12 @@ class FullSpectrum():
 	Class to get the full spectrum of the Hamiltonian
 	None temperature is zero temperature
 	"""
-	def __init__(self,clustered_k_points:np.ndarray,state_params:StatesParams,physical_params:HamiltonianParams,temperature:Union[None,float]=None):
+	def __init__(self,clustered_k_points:np.ndarray,state_params:StatesParams,physical_params:HamiltonianParams,temperature:Union[None,float]=None,ham_lib:str='quspin'):
 		self.clustered_k_points=clustered_k_points
 		self.state_params=state_params
 		self.physical_params=physical_params
 		self.temperature=temperature
+		self.ham_lib=ham_lib
 
 		
 
