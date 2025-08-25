@@ -664,8 +664,19 @@ class QuSpinHamiltonian():
     
 if __name__ == "__main__":
 
+    L=4
+    t=1
+    V=2
+    U=0
 
-    L=4.0
+    
+
+    #Test the filling spectrum
+    
+    exit('need to test the filling spectrum')
+
+
+    L=50
     t=1
     V=5
     mu=0
