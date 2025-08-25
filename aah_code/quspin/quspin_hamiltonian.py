@@ -10,6 +10,8 @@ from quspin.basis import spinful_fermion_basis_1d
 from itertools import combinations
 from aah_code.utils import mu_tilde_coefficient
 from aah_code.basis import LocalClusterBasis
+from aah_code.global_params import StatesParams
+from quspin_utils import extract_single_particle_hamiltonian_dense
 # from aah_code.global_params import StatesParams,HamiltonianParams
 # from aah_code.hamiltonian import FullSpectrum
 # from aah_code.hamiltonian import Hubbard1D
@@ -426,7 +428,9 @@ def hubbard_V_pi_int_pi(ham_dict:dict,bc="periodic",Nf=None,double_occupancy=Tru
     basis : quspin.basis.spinful_fermion_basis_1d
     """
     # basis over spin-↑ and spin-↓ fermions; Nf fixes (N_up, N_down) sector if given
-    L=ham_dict['L']
+
+    #NOTE! You need to set L to be the cluster size.
+    L=ham_dict['basis_class'].cluster_k_points.shape[0]
     t_0=ham_dict['t']
     V=ham_dict['V']
     U=ham_dict['U']
@@ -504,15 +508,188 @@ def hubbard_V_pi_int_pi(ham_dict:dict,bc="periodic",Nf=None,double_occupancy=Tru
 
 
 
+
+
+def hubbard_V_pi_int_half_pi(ham_dict:dict,bc="periodic",Nf=None,double_occupancy=True,dtype=np.float64):
+    """
+    Construct the mismatched case for pi modulation in V
+    (which becomes next-nearest-neighbor hopping in new basis)
+    and pi/2 modulation in U (diagonal in new basis)
+
+
+    Construct H = t_tilde * Σ_{⟨i,j⟩,σ} (c†_{iσ} c_{jσ} + h.c.)
+                   + V * Σ_{<<i,j>>} c†_{iσ} c_{jσ} + h.c.)
+                   + U * Σ_i n_{i↑} n_{i↓}
+                   - μ_tilde * Σ_i (n_{i↑} + n_{i↓})
+
+    Returns
+    -------
+    H : quspin.operators.hamiltonian
+    basis : quspin.basis.spinful_fermion_basis_1d
+    """
+    # basis over spin-↑ and spin-↓ fermions; Nf fixes (N_up, N_down) sector if given
+
+    #NOTE! You need to set L to be the cluster size.
+    if 'basis_classes' not in ham_dict:
+        raise ValueError("Constructing Ham for mismatched pi, pi/2 - basis_classes not found in ham_dict")
+        
+    if ham_dict['L'] != 4:
+        raise ValueError("Constructing Ham for mismatched pi, pi/2: L != 4")
+    else:
+        L=int(ham_dict['L'])
+
+    #First make the basis that spans the whole cluster (size 4)
+    
+    
+    basis = spinful_fermion_basis_1d(
+        L,
+        Nf=Nf,
+        double_occupancy=double_occupancy,
+    )
+    
+
+    t_0=ham_dict['t']
+    V=ham_dict['V']
+    U=ham_dict['U']
+    mu_0=ham_dict['mu']
+
+    def get_t_tilde(t_0,basis_object,dx=1):
+        cluster_k_points=basis_object.cluster_k_points
+        #There are two factor of 1/2:
+        #1. Comes from the 1/2 in the t_tilde definition
+        #2. Comes from double counting when including the hc - if you get confused about
+        # this again remember the two site model hopping eigenenergies are not \pm 2t but \pm t !
+        cluster_size=cluster_k_points.shape[0]
+        
+        t_tilde=(1/2)*(1/cluster_size)*np.array([2*t_0*np.cos(cluster_k_points[j])*(1/2)*2*t_0*np.cos(dx*2*np.pi*j/cluster_size) for j in range(cluster_size)]).sum()
+        return t_tilde
+    
+    # nearest-neighbor bonds
+    #AH! Notice an important point that comes up in the mismatched case,
+    #Here you have to make a decision about what the subcluster boundaries
+    #are.
+    #I THINK the answer is that the subclusters have to be periodic since 
+    #the periodicity is what we assumed to not have to deal with edge effects
+    #in the interaction. 
+    # This is easiest to see in the V-->0 limit. Here, we should recover the results for no
+    #V which would be periodic subclusters, now isolated and hence the full cluster.    
+    
+    static=[]
+
+    if 'basis_classes' in ham_dict:
+        for bc_index,basis_class in enumerate(ham_dict['basis_classes']):
+            #basis_object=ham_dict['basis_classes'][bc_index]
+            cluster_size=len(basis_class.cluster_k_points)
+            print(f'cluster k points: {basis_class.cluster_k_points}')
+            
+            within_cluster_indices=np.arange(bc_index*cluster_size,(bc_index+1)*cluster_size)
+
+
+            if bc == "periodic":
+                sub_cluster_nn_bonds = [(within_cluster_indices[i], (within_cluster_indices[(i+1)%cluster_size])) for i in range(len(within_cluster_indices))]
+                print(f'sub_cluster_nn_bonds: {sub_cluster_nn_bonds}')
+                #sub_cluster_nnn_bonds = [(i, (i + 2) % cluster_size) for i in range(cluster_size)]
+            elif bc == "open":
+                sub_cluster_nn_bonds = [(i, i + 1) for i in (within_cluster_indices - 1)]
+                #sub_cluster_nnn_bonds = [(i, i + 2) for i in range(cluster_size - 2)]
+            else:
+                raise ValueError("bc must be 'open' or 'periodic'")
+
+            #Add t_tilde within-cluster coupling terms:
+            t_tilde=get_t_tilde(t_0,basis_class)
+            
+            print(f't_tilde: {t_tilde}')
+            sub_hop_NN_pm = [[t_tilde, i, j] for (i, j) in sub_cluster_nn_bonds]  # "+-" terms (c†_i c_j)
+            sub_hop_NN_mp = [[-t_tilde, i, j] for (i, j) in sub_cluster_nn_bonds]  # "-+" terms (c_i c†_j)
+            
+            static.append(["+-|", sub_hop_NN_pm])
+            static.append(["-+|", sub_hop_NN_mp])
+            static.append(["|+-", sub_hop_NN_pm])
+            static.append(["|-+", sub_hop_NN_mp])
+
+            #Add mu_tilde within-cluster coupling terms:
+            mu_tilde=mu_tilde_coefficient(t_0,basis_class)
+            print(f'mu_tilde: {mu_tilde}')
+            mu_eff=mu_0-mu_tilde
+            sub_mu_list = [[-mu_eff, i] for i in within_cluster_indices]     # -μ(n_up + nß_down)
+        
+            static.append(["n|", sub_mu_list])
+            static.append(["|n", sub_mu_list])
+
+        #Now add cluster-spanning terms - the V between-cluster coupling and U
+
+        #Add V between-cluster coupling terms:
+        if bc == "periodic":
+            between_cluster_nnn_bonds = [(i, (i + 2) % L) for i in range(L)]
+            #sub_cluster_nnn_bonds = [(i, (i + 2) % cluster_size) for i in range(cluster_size)]
+        elif bc == "open":
+            between_cluster_nnn_bonds = [(i, (i + 2) % L) for i in range(cluster_size - 2)]
+            #sub_cluster_nnn_bonds = [(i, i + 2) for i in range(cluster_size - 2)]
+        
+        #Divide by 2 because the hermitian conjugate doubles the term
+        #This is just the usual doubling that comes from summing over each
+        #site and adding the hc term.
+        between_cluster_hop_NNN_pm = [[V/2, i, j] for (i, j) in between_cluster_nnn_bonds]  # "+-" terms (c†_i c_j)
+        between_cluster_hop_NNN_mp = [[-V/2, i, j] for (i, j) in between_cluster_nnn_bonds]  # "-+" terms (c_i c†_j)
+        static.append(["+-|", between_cluster_hop_NNN_pm])
+        static.append(["-+|", between_cluster_hop_NNN_mp])
+        static.append(["|+-", between_cluster_hop_NNN_pm])
+        static.append(["|-+", between_cluster_hop_NNN_mp])
+
+        
+        #Add diagonal U
+        U_list = [[U, i, i] for i in range(L)]
+        static.append(["n|n", U_list])
+
+        H = hamiltonian(static, [], basis=basis, dtype=dtype)
+        
+        return H, basis
+
+
+
+
 class QuSpinHamiltonian():
     def __init__(self,ham_dict:dict):
         self.ham_dict=ham_dict
+    
+    
 
     def create_pi_V_pi_int_ham(self):
-        ham=hubbard_V_pi_int_pi(self.ham_dict)
-        return ham    
+        ham,basis=hubbard_V_pi_int_pi(self.ham_dict)
+        return ham,basis    
     
 if __name__ == "__main__":
+
+
+    L=4.0
+    t=0
+    V=1
+    mu=0
+    U=0
+    mismatched_ks=np.array([[[-np.pi],[-np.pi/2]],[[0],[np.pi/2]]])
+    states_params=StatesParams(spin_states=2)
+    print(f'mismatched_ks shape: {mismatched_ks.shape}')
+    basis_classes=[LocalClusterBasis(mismatched_ks[0],states_params),LocalClusterBasis(mismatched_ks[1],states_params)]
+    
+    ham_dict={'L':L,'t':t,'V':V,'U':U,'mu':mu,'basis_classes':basis_classes}
+    
+    test_ham,test_basis=hubbard_V_pi_int_half_pi(ham_dict)
+    print(f'test_ham shape: {test_ham.toarray().shape}')
+
+    sp_ham,sp_basis=extract_single_particle_hamiltonian_dense(test_ham,test_basis,spin='up')
+
+    print(f'sp ham: {sp_ham}')
+    print(f'sp basis: {sp_basis}')
+    exit()
+    
+
+    # Visualize the single particle Hamiltonian with site indices
+    
+    
+   
+    
+
+    exit("Testing mismatched V pi, int pi/2")
    
     
     

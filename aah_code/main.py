@@ -28,7 +28,7 @@ def run_twosite(U,mu_0,V,t=1,system_size=10):
 
     return subtracted_eigvals[0]/2
 
-def run_cluster_method(U, mu_0, V=0, t=1, system_size=10):
+def run_cluster_method(U, mu_0, V=0, t=1, system_size=10,ham_lib:str='tenpy'):
     """
     Run cluster method calculation using corrected FullSpectrum class
     
@@ -60,7 +60,7 @@ def run_cluster_method(U, mu_0, V=0, t=1, system_size=10):
     physical_params = HamiltonianParams(U=U, V=V, hopping=t, mu_0=mu_0)
     
     # Now use the corrected FullSpectrum class
-    full_spectrum_object = FullSpectrum(k_points, state_params, physical_params)
+    full_spectrum_object = FullSpectrum(k_points, state_params, physical_params,ham_lib=ham_lib)
     cluster_spectra = full_spectrum_object.get_full_spectrum()
     
     # Get ground state expectations (zero temperature)
@@ -112,7 +112,7 @@ def compare_half_filling_U_fixed_V(U_values,mu_subtraction:bool=True,V:float=0):
         
         # Cluster method
         print("Running cluster method...")
-        energy_cluster, filling_cluster = run_cluster_method(U, mu_0, V, t, system_size)
+        energy_cluster, filling_cluster = run_cluster_method(U, mu_0, V, t, system_size,ham_lib='tenpy')
         energies_cluster.append(energy_cluster)
         fillings_cluster.append(filling_cluster)
         

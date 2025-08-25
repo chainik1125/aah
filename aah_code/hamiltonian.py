@@ -22,8 +22,9 @@ from plotly.subplots import make_subplots
 import plotly.io as pio
 from tenpy.networks import mps
 from tqdm import tqdm
-from aah_code.quspin.quspin_hamiltonian import create_quspin_hamiltonian
-
+from aah_code.quspin.quspin_hamiltonian import QuSpinHamiltonian
+from quspin.operators import hamiltonian
+from quspin.basis import spin_basis_1d
 from aah_code.real_space_dmrg import run_dmrg_method, get_gnd_infinite,get_gnd
 # Set Plotly to use browser renderer to avoid nbformat issues
 #pio.renderers.default = "browser"
@@ -373,6 +374,8 @@ class SpectrumSolver():
 				eigvecs.append(psi_mps)
 				n_ups.append(n_up)
 				n_downs.append(n_down)
+			eigvals=np.stack(eigvals,axis=0)
+			eigvecs=np.stack(eigvecs,axis=0)
 			n_ups=np.stack(n_ups,axis=0)
 			n_downs=np.stack(n_downs,axis=0)
 			n_tot=n_ups+n_downs
@@ -381,10 +384,60 @@ class SpectrumSolver():
 			#TODO:add functionality to efficiently get smaller number of total states.
 
 		elif self.ham_lib=='quspin':
-			raise ValueError('Am implementing quspin, not ready yet, just placeholders below')
-			ed_ham=create_quspin_hamiltonian(self.hamiltonian)
-			ed_ham.eigvalsh()
-			return ed_ham.eigvalsh()
+			#Note: I need the basis as well as the hamitlonian for quspin
+			#if I want to get the more general operator expectation values
+			#i.e the spin and number operators.
+			from scipy import sparse
+			
+			ham,basis=self.hamiltonian
+			ed_ham=ham.toarray()
+			eigvals,eigvecs=np.linalg.eigh(ed_ham)
+			  # After getting eigenvalues and eigenvectors
+
+			# Simplified approach: construct total number operators directly
+			from quspin.operators import hamiltonian
+			
+			# Build total number operators for each site explicitly
+			n_up_site_ops = []
+			n_down_site_ops = []
+			
+			for site in range(basis.L):
+				# Construct n_up and n_down operators for this site
+				n_up_list = [[1.0, site]]   # coefficient, site index
+				n_down_list = [[1.0, site]]
+				
+				static_up = [["n|", n_up_list]]    # spin-up number operator  
+				static_down = [["|n", n_down_list]]  # spin-down number operator
+				
+				n_up_op = hamiltonian(static_up, [], basis=basis, dtype=np.complex128)
+				n_down_op = hamiltonian(static_down, [], basis=basis, dtype=np.complex128)
+				
+				n_up_site_ops.append(n_up_op)
+				n_down_site_ops.append(n_down_op)
+
+			n_ups=[]
+			n_downs=[]
+			energy_eigvals=[]
+			energy_eigvecs=[]
+
+			# For each eigenvector, calculate site-resolved expectation values
+			for i, (E_i, psi_vec) in enumerate(zip(eigvals, eigvecs.T)):
+				# Calculate site-resolved number expectations using hamiltonian expectation values
+				n_up_sites = np.array([np.real(op.expt_value(psi_vec)) for op in n_up_site_ops])
+				n_down_sites = np.array([np.real(op.expt_value(psi_vec)) for op in n_down_site_ops])
+				
+				n_ups.append(n_up_sites)
+				n_downs.append(n_down_sites)
+				energy_eigvals.append(E_i)
+				energy_eigvecs.append(psi_vec)
+			
+			n_ups=np.stack(n_ups,axis=0)  # shape: (n_eigenstates, n_sites)
+			n_downs=np.stack(n_downs,axis=0)  # shape: (n_eigenstates, n_sites)
+			n_tot=n_ups+n_downs
+			energy_eigvals=np.array(energy_eigvals)
+
+			return energy_eigvals,energy_eigvecs,n_ups,n_downs,n_tot
+
 		else:
 
 			raise ValueError(f'Solver {self.ham_lib} not implemented yet')
@@ -415,15 +468,22 @@ class FullSpectrum():
 		ham_objects=[]
 		for cluster_k in self.clustered_k_points:		
 			cluster_object=LocalClusterBasis(cluster_k,self.state_params)
-			hamiltonian_object=Hubbard1D({'basis_class':cluster_object,
-											'V':self.physical_params.V,
-											't':self.physical_params.hopping,
-											'mu':self.physical_params.mu_0,
-											'U':self.physical_params.U,
-											})
+			ham_dict={'basis_class':cluster_object,
+												'V':self.physical_params.V,
+												't':self.physical_params.hopping,
+												'mu':self.physical_params.mu_0,
+												'U':self.physical_params.U,
+												}
+			if self.ham_lib=='tenpy':
+				hamiltonian_object=Hubbard1D(ham_dict)
+			elif self.ham_lib=='quspin':
+				
+				ham_object,basis_object=QuSpinHamiltonian(ham_dict).create_pi_V_pi_int_ham()
+				hamiltonian_object=(ham_object,basis_object)
+			else:
+				raise ValueError(f'Hamiltonian library {self.ham_lib} not implemented yet')
 			
-			
-			spectrum_solver=SpectrumSolver(hamiltonian_object,cluster_object)
+			spectrum_solver=SpectrumSolver(hamiltonian_object,cluster_object,self.ham_lib)
 			eigvals,eigvecs,n_ups,n_downs,n_tot=spectrum_solver.solve_spectrum()
 			
 			k_points.append(cluster_k)
@@ -2077,6 +2137,7 @@ def expectations_plot_combined(physical_params: HamiltonianParams):
 
 if __name__ == "__main__":
 	print('main')
+
 
 	# Test Hamiltonian inspection
 	# test_hamiltonian_inspection()
