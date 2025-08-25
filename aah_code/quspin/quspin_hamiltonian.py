@@ -11,7 +11,7 @@ from itertools import combinations
 from aah_code.utils import mu_tilde_coefficient
 from aah_code.basis import LocalClusterBasis
 from aah_code.global_params import StatesParams
-from quspin_utils import extract_single_particle_hamiltonian_dense
+from aah_code.quspin.quspin_utils import extract_single_particle_hamiltonian_dense
 # from aah_code.global_params import StatesParams,HamiltonianParams
 # from aah_code.hamiltonian import FullSpectrum
 # from aah_code.hamiltonian import Hubbard1D
@@ -561,7 +561,7 @@ def hubbard_V_pi_int_half_pi(ham_dict:dict,bc="periodic",Nf=None,double_occupanc
         # this again remember the two site model hopping eigenenergies are not \pm 2t but \pm t !
         cluster_size=cluster_k_points.shape[0]
         
-        t_tilde=(1/2)*(1/cluster_size)*np.array([2*t_0*np.cos(cluster_k_points[j])*(1/2)*2*t_0*np.cos(dx*2*np.pi*j/cluster_size) for j in range(cluster_size)]).sum()
+        t_tilde=(1/2)*(1/cluster_size)*np.array([2*t_0*np.cos(cluster_k_points[j])*(1/2)*2*np.cos(dx*2*np.pi*j/cluster_size) for j in range(cluster_size)]).sum()
         return t_tilde
     
     # nearest-neighbor bonds
@@ -651,19 +651,23 @@ def hubbard_V_pi_int_half_pi(ham_dict:dict,bc="periodic",Nf=None,double_occupanc
 class QuSpinHamiltonian():
     def __init__(self,ham_dict:dict):
         self.ham_dict=ham_dict
+        
     
     
-
     def create_pi_V_pi_int_ham(self):
         ham,basis=hubbard_V_pi_int_pi(self.ham_dict)
-        return ham,basis    
+        return ham,basis
+    
+    def create_pi_V_pi_int_half_pi_ham(self):
+        ham,basis=hubbard_V_pi_int_half_pi(self.ham_dict)
+        return ham,basis
     
 if __name__ == "__main__":
 
 
     L=4.0
-    t=0
-    V=1
+    t=1
+    V=5
     mu=0
     U=0
     mismatched_ks=np.array([[[-np.pi],[-np.pi/2]],[[0],[np.pi/2]]])

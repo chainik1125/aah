@@ -606,7 +606,7 @@ class MismatchedQuick():
 			logger.info('No new k-clusters found')
 			return np.array([])
 
-def get_spectra(cluster_ks, state_params, physical_params,return_ham:bool=False):
+def get_spectra(cluster_ks, state_params, physical_params,return_ham:bool=False,ham_lib:str='tenpy'):
 	#Lets try to make the hamiltonian
 
 	k_points=[]
@@ -620,21 +620,28 @@ def get_spectra(cluster_ks, state_params, physical_params,return_ham:bool=False)
 		test_basis_1=LocalClusterBasis(cluster_k[0],state_params)
 		test_basis_2=LocalClusterBasis(cluster_k[1],state_params)
 		#logger.info(f'total_cluster size: {total_cluster_size}')
+		ham_dict={'basis_classes':[test_basis_1,test_basis_2],
+						'L':total_cluster_size,
+						'L_cluster':cluster_k.shape[0],
+						'V':physical_params.V,
+						't':physical_params.hopping,
+						'U':physical_params.U,
+						'mu':physical_params.mu_0,
+						}
+		if ham_lib=='tenpy':
+			test_ham=QuickHubbard1D(ham_dict)
+		elif ham_lib=='quspin':
+			quspin_object=QuSpinHamiltonian(ham_dict)
+			
+			#note that test_ham here is a tuple of (test_ham,test_basis), just formatting it this way to be consistent with what to feed in from tenpy.
+
+			test_ham=quspin_object.create_pi_V_pi_int_half_pi_ham()
+		else:
+			raise ValueError(f'Hamiltonian library {ham_lib} not implemented yet')
+			
 		
-		test_ham=QuickHubbard1D({'basis_classes':[test_basis_1,test_basis_2],
-					'L':total_cluster_size,
-					'L_cluster':cluster_k.shape[0],
-					'V':physical_params.V,
-					't':physical_params.hopping,
-					'U':physical_params.U,
-					'mu':physical_params.mu_0,
-					})
 		
-		
-		
-		
-		
-		solver=SpectrumSolver(test_ham,None)#basis object never explicitly used anyway
+		solver=SpectrumSolver(test_ham,None,ham_lib)#basis object never explicitly used anyway
 		eigvals,eigvecs,n_ups,n_downs,n_tot=solver.solve_spectrum()
 		
 
@@ -662,7 +669,7 @@ def get_spectra(cluster_ks, state_params, physical_params,return_ham:bool=False)
 
 
 
-def test_quick_mismatched(lattice_points,cluster_size,physical_params):
+def test_quick_mismatched(lattice_points,cluster_size,physical_params,ham_lib:str='tenpy'):
 	#lattice_points=16
 	#cluster_size=2
 	#physical_params=HamiltonianParams(U=10,V=5,hopping=1,mu_0=10/2)
@@ -675,12 +682,13 @@ def test_quick_mismatched(lattice_points,cluster_size,physical_params):
 	#print(f'cluster idxs: {cluster_idxs}')
 
 	#k_points,energies,number_spectrum,spin_spectrum=get_spectra(cluster_ks)
-	spectra_4tuple=get_spectra(cluster_ks, state_params, physical_params)
+	spectra_4tuple=get_spectra(cluster_ks, state_params, physical_params,ham_lib=ham_lib)
 	
 	print(f'k points shape: {spectra_4tuple[0].shape},\n energies shape: {spectra_4tuple[1].shape},\n number_spectrum shape: {spectra_4tuple[2].shape}, spin spectrum shape: {spectra_4tuple[3].shape}')
 
 	full_spectrum_obj=FullSpectrum(None,state_params,physical_params,None)
 	system_expectations,cluster_expectations=full_spectrum_obj.get_cluster_thermodynamic_expectations(spectra_4tuple,None)
+	
 	return system_expectations,cluster_expectations
 	# print(f"system energy density: {system_expectations[0]/lattice_points}",
 	#    	f"system energy density mu_subtracted: {(system_expectations[0]+system_expectations[1]*physical_params.mu_0)/lattice_points} "

@@ -6,10 +6,10 @@ from aah_code.quspin.quspin_hamiltonian import QuSpinHamiltonian
 from aah_code.basis import LocalClusterBasis
 from aah_code.clusters import ClusterExperiment
 from aah_code.global_params import StatesParams,HamiltonianParams
-from aah_code.main import run_cluster_method
+from aah_code.main import run_cluster_method, run_dmrg_method
 from aah_code.quspin.quspin_utils import extract_single_particle_hamiltonian_dense
 from aah_code.quspin.quspin_hamiltonian import hubbard_V_pi_int_half_pi
-
+from aah_code.hamiltonian import test_quick_mismatched
 
 log = logging.getLogger(__name__)
 
@@ -86,6 +86,53 @@ class TestHamiltonian:
 
         
         np.testing.assert_allclose(reconstructed_many_body_eigvals,many_body_eigvals,atol=1e-9)
+    
+    def test_mismatched_nonint_dmrg_match(self):
+        
+        lattice_points=60
+        U=0
+        V=0
+        t=5e-1
+        mu_0=0
+        physical_params=HamiltonianParams(U,V,t,mu_0)
+
+        cluster_size=2 #remember this is the int cluster size
+        
+        
+        system_expectations,cluster_expectations=test_quick_mismatched(lattice_points,cluster_size,physical_params,ham_lib='quspin')
+        total_energy,total_filling,total_spin=system_expectations
+
+        sub_en_density=(total_energy+mu_0*total_filling)/lattice_points
+
+        log.debug(f'site energy density: {sub_en_density}')
+        log.debug(f'filling density: {total_filling/lattice_points}')
+        log.debug(f'site spin density: {total_spin/lattice_points}')
+
+        energy_dmrg, filling_dmrg, psi = run_dmrg_method(U, mu_0, V, t, cluster_size, chi=80)
+
+        energy_dmrg_subtracted = energy_dmrg + (mu_0 * filling_dmrg)
+
+        log.debug(f'dmrg energy density: {energy_dmrg_subtracted/cluster_size}')
+        log.debug(f'dmrg filling density: {filling_dmrg}')
+
+        log.debug(f'DMRG energy density: {energy_dmrg_subtracted}')
+        log.debug(f'cluster energy density: {sub_en_density}')
+        log.debug(f'% Error: {np.abs((energy_dmrg_subtracted-sub_en_density)/sub_en_density)*100}')
+
+        
+
+
+        
+
+
+
+
+
+
+    
+        
+        
+
     
         
 
