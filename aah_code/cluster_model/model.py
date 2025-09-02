@@ -44,6 +44,9 @@ class ClusterModelConfig:
     L:int
     physical_params:Union[PhysicalParams,None]=None
     ham_lib:str='quspin'
+    model_bc:Union[str,'periodic','open']='periodic'
+    int_cluster_bc:Union[str,'periodic','open']='periodic'
+    super_cluster_bc:Union[str,'periodic',"open"]='periodic'
 
 
     def __post_init__(self):
@@ -88,6 +91,8 @@ class ClusterModel:
         NOTE: Hamiltonian not yet converted to np array, use .toarray() to get it.
         """
         return None
+    
+        
     
     #####################################################################
     #After this point, you should just be able to use the refactored versions of your existing functions.
