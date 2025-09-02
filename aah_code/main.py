@@ -341,7 +341,7 @@ def U_V_difference_heatmap(U_values,V_values,include_twosite=False):
                     
                     # DMRG method
                     print("Running DMRG method...")
-                    energy_dmrg, filling_dmrg = run_dmrg_method(U, mu_0, V, t, system_size, chi)
+                    energy_dmrg, filling_dmrg, psi_dmrg = run_dmrg_method(U, mu_0, V, t, system_size, chi)
                     energy_dmrg_subtracted=energy_dmrg+(mu_0*filling_dmrg*system_size)
 
                     dmrg_tuple=(energy_dmrg_subtracted,filling_dmrg)
@@ -516,6 +516,8 @@ def U_V_difference_heatmap(U_values,V_values,include_twosite=False):
 if __name__ == "__main__":
     U_values=np.linspace(0,5,2)
     V_values=np.linspace(0,5,2)
+
+
     fig = U_V_difference_heatmap(U_values,V_values,include_twosite=True)
     
     # Save as HTML file instead of showing interactively

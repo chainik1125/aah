@@ -1044,7 +1044,7 @@ def compare_all_methods_vs_U(U_values, V=0, t=1):
 	
 	return fig
 
-def compare_methods_line_plots(U_values, V_values, t=1, precomputed_results=None):
+def compare_methods_line_plots(U_values, V_values, t=1, precomputed_results=None, ham_lib='tenpy'):
 	"""
 	Create line plots showing all four methods for varying U at fixed V values.
 	Each figure shows 2x3 subplots (energy top row, filling bottom row).
@@ -1055,6 +1055,7 @@ def compare_methods_line_plots(U_values, V_values, t=1, precomputed_results=None
 		V_values: Array of V values
 		t: Hopping parameter
 		precomputed_results: Optional dict with pre-computed results to avoid re-solving
+		ham_lib: Hamiltonian library backend ('tenpy' or 'quspin')
 	"""
 	from aah_code.main import run_cluster_method, run_dmrg_method, run_twosite
 	import math
@@ -1108,12 +1109,12 @@ def compare_methods_line_plots(U_values, V_values, t=1, precomputed_results=None
 				energy_twosite = run_twosite(U, mu_0, V, t, system_size)
 				filling_twosite = 1.0
 				
-				energy_cluster_2, filling_cluster_2 = run_cluster_method(U, mu_0, V, t, system_size)
+				energy_cluster_2, filling_cluster_2 = run_cluster_method(U, mu_0, V, t, system_size, ham_lib=ham_lib)
 				energy_cluster_2_subtracted = (energy_cluster_2 + mu_0 * filling_cluster_2) / system_size
 				filling_cluster_2_normalized = filling_cluster_2 / system_size
 				
 				physical_params = HamiltonianParams(U, V, t, mu_0)
-				system_expectations, cluster_expectations = test_quick_mismatched(lattice_points, cluster_size, physical_params)
+				system_expectations, cluster_expectations = test_quick_mismatched(lattice_points, cluster_size, physical_params, ham_lib=ham_lib)
 				total_energy, total_filling, total_spin = system_expectations
 				energy_cluster_4_subtracted = (total_energy + physical_params.mu_0 * total_filling) / lattice_points
 				filling_cluster_4_normalized = total_filling / lattice_points
@@ -1239,7 +1240,7 @@ def compare_methods_line_plots(U_values, V_values, t=1, precomputed_results=None
 		
 		# Update layout
 		fig.update_layout(
-			title=f'Method Comparison Line Plots (Figure {fig_idx + 1}/{n_figures})',
+			title=f'Method Comparison Line Plots ({ham_lib.upper()} backend) (Figure {fig_idx + 1}/{n_figures})',
 			showlegend=True
 		)
 		

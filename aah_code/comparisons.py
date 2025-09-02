@@ -10,6 +10,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from tqdm import tqdm
 from aah_code.main import run_cluster_method, run_dmrg_method
+from aah_code.hamiltonian import compare_methods_line_plots
 
 
 # Set Plotly to use browser renderer to avoid nbformat issues
@@ -538,9 +539,15 @@ def get_site_resolved_spectra(U, V, system_size=10, t=1.0):
 
 
 if __name__ == "__main__":
+    
     # Example usage: small parameter space scan
     U_values = np.linspace(0, 5, 5)
     V_values = np.linspace(1e-8, 5, 5) 
+
+    figures=compare_methods_line_plots(U_values,V_values,ham_lib='quspin')
+    for fig in figures:
+        fig.show()
+    exit()
     
     # print("Creating QuSpin vs TenPy comparison heatmap...")
     # fig = quspin_vs_tenpy_heatmap(U_values, V_values, system_size=20)
