@@ -7,7 +7,7 @@ import numpy as np
 import quspin
 from quspin.operators import hamiltonian
 from quspin.basis import spinful_fermion_basis_1d
-from typing import Tuple, Dict, List
+from typing import Tuple, Dict, List, Optional
 from collections import defaultdict
 from typing import Any
 from aah_code.cluster_model.clustering import step_from_ratio
@@ -295,6 +295,206 @@ def make_v_hamiltonian(V:float,
 
     # return H, basis
 
+def compute_V_couplings_bruteforce(
+    V_separation: int,
+    k_sites_supercluster: np.ndarray,   # shape = (num_clusters_in_SC, Nc)
+    interaction_cluster_separation: Optional[int] = None,  # unused; kept for API parity
+    *,
+    L: Optional[int] = None,            # total number of k points (modulo)
+    V0: float = 1.0,                    # overall amplitude
+    R_alpha: Optional[np.ndarray] = None,  # positions inside cluster; default [0..Nc-1]
+    spinful: bool = False,              # emit spinful QuSpin lists too
+    strict: bool = True,                # error if k+n exits this supercluster
+    rtol_prune: float = 0.0, atol_prune: float = 0.0,  # prune tiny coeffs in output
+    validate: bool = False,             # run permutation-conjugation validator
+    atol_val: float = 1e-12             # tolerance for validation comparisons
+) -> Dict[str, object]:
+    """
+    Brute-force a-sum for the V-modulation term in the *canonical* finite-cluster alpha basis.
+    Implements (V0/2) * sum_k c†_{k+n} c_k + h.c.
+
+    Inputs
+    ------
+    V_separation : int
+        n in k-steps (i.e. Delta = 2*pi*n/L); hop k -> k + n (mod L).
+    k_sites_supercluster : (C, Nc) int array
+        Global k labels for one *supercluster*, organized by interaction clusters (first dim)
+        and within-cluster indices a=0..Nc-1 (second dim).
+    interaction_cluster_separation : int or None
+        Present for signature parity; not used.
+    L : int or None
+        Total number of global k points (period). Pass explicitly for correctness.
+        If None, uses max(k)+1, which only works if this SC reaches the max label.
+    V0 : float
+        Overall scale for V.
+    R_alpha : (Nc,) array or None
+        Real-space positions for alpha transform; default np.arange(Nc).
+    spinful : bool
+        If True, also produce spinful QuSpin static op lists.
+    strict : bool
+        If True, raise if k+n not found in provided supercluster; else skip.
+    rtol_prune, atol_prune : float
+        Prune |coeff| <= atol + rtol*row_norm in the flattened pair list.
+    validate : bool
+        If True, compute per-block P-matrices and check T ≈ (V0/2)*U^† P U.
+    atol_val : float
+        Absolute tolerance for validation.
+    """
+    k_sites = np.asarray(k_sites_supercluster, dtype=int)
+    num_clusters, Nc = k_sites.shape
+
+    if L is None:
+        L = int(k_sites.max()) + 1  # heuristic; better to pass L
+
+    if R_alpha is None:
+        R_alpha = np.arange(Nc, dtype=float)
+    else:
+        R_alpha = np.asarray(R_alpha, dtype=float)
+        assert R_alpha.shape == (Nc,)
+
+    # Canonical finite-cluster k-grid (same in each cluster)
+    kappa = 2.0 * np.pi * np.arange(Nc, dtype=float) / float(Nc)
+
+    # Map: global k -> (mu, a)
+    k_to_mu_a: Dict[int, Tuple[int, int]] = {}
+    for mu in range(num_clusters):
+        for a in range(Nc):
+            k = int(k_sites[mu, a])
+            if k in k_to_mu_a:
+                raise ValueError(f"Duplicate k={k} found in this supercluster.")
+            k_to_mu_a[k] = (mu, a)
+
+    # Blocks (mu' <- mu) in alpha basis: T^{(mu->mu')} \in C^{Nc x Nc}
+    blocks: Dict[Tuple[int, int], np.ndarray] = defaultdict(lambda: np.zeros((Nc, Nc), dtype=np.complex128))
+
+    # Optional permutation matrices for validation
+    perms: Dict[Tuple[int, int], np.ndarray] = defaultdict(lambda: np.zeros((Nc, Nc), dtype=np.int8)) if validate else {}
+
+    # Prefactor from the two DFTs: (V0/2)*(1/Nc)
+    pref = (V0 / 2.0) * (1.0 / float(Nc))
+
+    # Cache exponentials
+    exp_cache_alpha: Dict[int, np.ndarray] = {}  # b -> e^{+i kappa_b R_alpha}
+    exp_cache_beta:  Dict[int, np.ndarray] = {}  # a -> e^{-i kappa_a R_beta} (reuse R_alpha shape)
+
+    for mu in range(num_clusters):
+        for a in range(Nc):
+            k = int(k_sites[mu, a])
+            k_prime = (k + V_separation) % L
+            hit = k_to_mu_a.get(k_prime, None)
+            if hit is None:
+                if strict:
+                    raise ValueError(
+                        f"k'={k_prime} from (mu={mu}, a={a}, k={k}) not in this supercluster. "
+                        "Provide the full fused SC or set strict=False to skip."
+                    )
+                else:
+                    continue
+
+            mu_prime, b = hit
+
+            # e^{+i kappa_b R_alpha}
+            if b not in exp_cache_alpha:
+                exp_cache_alpha[b] = np.exp(1j * kappa[b] * R_alpha)
+            phase_alpha = exp_cache_alpha[b]  # (Nc,)
+
+            # e^{-i kappa_a R_beta}
+            if a not in exp_cache_beta:
+                # use R_alpha just for vector length Nc
+                exp_cache_beta[a] = np.exp(-1j * kappa[a] * R_alpha)
+            phase_beta = exp_cache_beta[a]   # (Nc,)
+
+            # Outer product over (alpha, beta)
+            contrib = pref * np.outer(phase_alpha, phase_beta)  # (Nc, Nc)
+            blocks[(mu_prime, mu)] += contrib
+
+            # Record permutation for validation
+            if validate:
+                perms[(mu_prime, mu)][b, a] += 1  # should stay 0/1 for disjoint mapping
+
+    # Flatten to (i, j, coeff) using i = mu' * Nc + alpha, j = mu * Nc + beta
+    pairs: List[Tuple[int, int, complex]] = []
+    for (mu_p, mu), T in blocks.items():
+        # Optional pruning
+        if (atol_prune > 0.0) or (rtol_prune > 0.0):
+            row_norm = np.max(np.sum(np.abs(T), axis=1)) if T.size else 0.0
+            mask = np.abs(T) > (atol_prune + rtol_prune * row_norm)
+        else:
+            mask = np.ones_like(T, dtype=bool)
+
+        for alpha in range(Nc):
+            i = mu_p * Nc + alpha
+            for beta in range(Nc):
+                if not mask[alpha, beta]:
+                    continue
+                j = mu * Nc + beta
+                coeff = T[alpha, beta]
+                if coeff != 0.0:
+                    pairs.append((i, j, complex(coeff)))
+
+    # Build QuSpin static lists (spinless and optional spinful).
+    hop_ij = [[complex(c), int(i), int(j)] for (i, j, c) in pairs]
+    hop_ji_hc = [[complex(np.conjugate(c)), int(j), int(i)] for (i, j, c) in pairs]
+
+    to_quspin_spinless = [
+        ["+-", hop_ij],
+        ["-+", hop_ji_hc],
+    ]
+
+    out = {
+        "pairs": pairs,
+        "blocks": dict(blocks),
+        "Nc": Nc,
+        "num_clusters": num_clusters,
+        "to_quspin_spinless": to_quspin_spinless,
+    }
+
+    if spinful:
+        to_quspin_spinful = [
+            ["+-|", hop_ij],    # up
+            ["-+|", hop_ji_hc],
+            ["|+-", hop_ij],    # down
+            ["|-+", hop_ji_hc],
+        ]
+        out["to_quspin_spinful"] = to_quspin_spinful
+
+    # ===== Validation: T ?= (V0/2) * U^† P U =====
+    if validate:
+        # Build U once
+        U = (1.0 / np.sqrt(Nc)) * np.exp(-1j * np.outer(kappa, R_alpha))  # shape (Nc, Nc)
+        Udag = np.conjugate(U.T)
+
+        per_block_err = {}
+        max_abs_err = 0.0
+        ok = True
+
+        for key, T_bf in blocks.items():
+            P = perms[key]
+            # Check P sanity: each column has at most one 1; entries are 0/1
+            if not np.all((P == 0) | (P == 1)):
+                raise ValueError(f"Permutation for block {key} has entries not in {{0,1}}.")
+            if np.any(np.sum(P, axis=0) > 1):
+                raise ValueError(f"Permutation for block {key} maps some source 'a' to multiple targets.")
+
+            T_perm = (V0 / 2.0) * (Udag @ P @ U)
+            diff = T_bf - T_perm
+            err = float(np.max(np.abs(diff)))
+            per_block_err[key] = err
+            max_abs_err = max(max_abs_err, err)
+            if err > atol_val:
+                ok = False
+
+        out["validation"] = {
+            "ok": ok,
+            "max_abs_err": max_abs_err,
+            "per_block_err": per_block_err,
+            "atol": atol_val,
+        }
+        # Also expose the raw permutations if you want to inspect
+        out["permutations"] = dict(perms)
+
+    return out
+
 
 if __name__ == "__main__":
     print("testing hamiltonian construction")
@@ -310,11 +510,53 @@ if __name__ == "__main__":
     print(f'full_clusters shape: {full_clusters.shape}')
     
     print(f'full_clusters: {full_clusters}')
+
+    test_super_cluster_sites=full_clusters[0]
+
+    V_sep=int(L*V_separation_ratio[0]/V_separation_ratio[1])
+    int_sep=int(L*int_separation_ratio[0]/int_separation_ratio[1])
+    #test_v_couplings=compute_V_couplings_bruteforce(V_sep,test_super_cluster_sites,int_sep,L,V_0,spinful=True)
     
-    make_v_hamiltonian(V_0,V_separation_ratio,
-                    supercluster_k=full_clusters_k[0],
-                    supercluster_idxs=full_clusters[0],
-                    L=L,
-                    V_separation_ratio=(1,2),
-                    bc="periodic",
-                    dtype=np.float64)
+    res = compute_V_couplings_bruteforce(
+    V_separation=V_sep,
+    k_sites_supercluster=test_super_cluster_sites,
+    L=L,
+    V0=V_0,
+    spinful=True,
+    validate=True,   # <-- run the block-wise validator
+    atol_val=1e-8
+    )
+
+    print("Validation OK?:", res["validation"]["ok"])
+    print("Max abs error:", res["validation"]["max_abs_err"])
+    print("Per-block errors:", res["validation"]["per_block_err"])
+
+    print("\nalpha-basis pairs (i <- j : coeff):")
+    for i, j, c in res["pairs"]:
+        print(f"{i} <- {j} : {c}")
+
+    print("\nQuSpin static (spinless):", res["to_quspin_spinless"])
+    print("\nQuSpin static (spinful):", res["to_quspin_spinful"])
+
+    # Visualize the couplings (one-line call)
+    from aah_code.cluster_model.visualization_helpers import visualize_quspin_couplings_1d_chain
+    import os
+    os.makedirs('large_files/viz', exist_ok=True)
+    visualize_quspin_couplings_1d_chain(
+        res['to_quspin_spinful'], 
+        k_sites_supercluster=test_super_cluster_sites,
+        output_file='large_files/viz/v_couplings_visualization.html'
+    )
+
+    #For now, I need to just see if I can get the V terms correct
+
+
+
+    
+    # make_v_hamiltonian(V_0,V_separation_ratio,
+    #                 supercluster_k=full_clusters_k[0],
+    #                 supercluster_idxs=full_clusters[0],
+    #                 L=L,
+    #                 V_separation_ratio=(1,2),
+    #                 bc="periodic",
+    #                 dtype=np.float64)
