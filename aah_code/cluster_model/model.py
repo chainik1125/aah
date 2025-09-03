@@ -46,7 +46,7 @@ class ClusterModelConfig:
     ham_lib:str='quspin'
     model_bc:Union[str,'periodic','open']='periodic'
     int_cluster_bc:Union[str,'periodic','open']='periodic'
-    super_cluster_bc:Union[str,'periodic',"open"]='periodic'
+    super_cluster_bc:Union[str,'periodic','open']='periodic'
 
 
     def __post_init__(self):

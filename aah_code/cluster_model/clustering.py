@@ -83,13 +83,110 @@ def build_int_clusters(L: int, Nc: int, m: int, g1: int, blocks_per_orbit: int) 
 
 
 
-def fuse_by_hops(clusters: List[List[int]], L: int, m: int, ns: List[int]) -> tuple[int, List[List[List[int]]]]:
-    g = gcd_many(L, m, *ns)   # #components
-    groups = [[] for _ in range(g)]
-    for C in clusters:
-        groups[C[0] % g].append(C)  # each +m block stays in one residue mod g
-    return g, groups
+# def fuse_by_hops(clusters: List[List[int]], L: int, m: int, ns: List[int]) -> tuple[int, List[List[List[int]]]]:
+#     g = gcd_many(L, m, *ns)   # #components
+#     groups = [[] for _ in range(g)]
+#     for C in clusters:
+#         groups[C[0] % g].append(C)  # each +m block stays in one residue mod g
+#     return g, groups
 
+
+def _gcd_many(*xs: int) -> int:
+    return reduce(gcd, xs)
+
+def _modinv(a: int, mod: int) -> int:
+    # assumes gcd(a, mod) == 1
+    return pow(a, -1, mod)
+
+def fuse_by_hops(
+    int_clusters: List[List[int]],   # clusters built along +m (each length Nc, in +m order)
+    L: int,
+    Nc: int,
+    m: int,                          # lattice step for +m tiling
+    ns: List[int],                   # list of extra hop steps (each = (p/q)*L % L)
+    *,
+    g1: int,                         # gcd(L,m)
+    qm: int,                         # L // g1
+    use_m_edges: bool = False,       # True = old semantics; False = n-only fusion
+):
+    """
+    Returns:
+      num_components: int
+      blocks_per_component: int
+      superclusters: List[List[List[int]]]   # each is a list of +m-clusters (blocks)
+    """
+    B = qm // Nc  # blocks per +m orbit
+
+    # Helper to compute orbit index 'a' and block index 'b' for a block seed
+    if qm == 1:
+        inv_m = None
+    else:
+        mprime = m // g1
+        inv_m  = _modinv(mprime % qm, qm)  # m'^{-1} (mod q_m)
+
+    def _ab(seed: int) -> Tuple[int,int]:
+        a = seed % g1
+        if qm == 1:
+            return a, 0
+        t = ((seed - a) // g1)  # index along the +m orbit before mod q_m
+        t = (t * inv_m) % qm    # position along orbit (0..q_m-1)
+        b = (t // Nc) % B
+        return a, b
+
+    # --- semantics 1: include +m edges during fusion (old behavior) ---
+    if use_m_edges:
+        g = _gcd_many(L, m, *ns) if ns else gcd(L, m)
+        groups: List[List[List[int]]] = [[] for _ in range(g)]
+        for C in int_clusters:
+            r = C[0] % g  # residue mod g identifies component
+            groups[r].append(C)
+        return g, (L // g) // Nc, groups
+
+    # --- semantics 2: n-only fusion (cut +m edges between blocks) ---
+    if not ns:
+        # no V edges -> every block stands alone
+        groups = [[C] for C in int_clusters]
+        return len(groups), 1, groups
+
+    # Case split: do any n_i change +m orbit?
+    if any(n % g1 != 0 for n in ns):
+        # Orbit-changing present. Components are residue classes mod G_orb:
+        G_orb = _gcd_many(g1, *ns)  # = gcd(g1, n1, n2, ...)
+        groups: List[List[List[int]]] = [[] for _ in range(G_orb)]
+        for C in int_clusters:
+            a, _ = _ab(C[0])
+            groups[a % G_orb].append(C)
+        num = G_orb
+        per = (g1 // G_orb) * B
+        return num, per, groups
+
+    # All n_i preserve the +m orbits
+    # Work orbit-by-orbit; within an orbit we either (i) are connected, or (ii) split by a block stride.
+    # Compute r_i = (n_i/g1) * m'^{-1} (mod q_m); s_i = r_i mod Nc
+    r_list = [((n // g1) * inv_m) % qm for n in ns]
+    s_list = [r % Nc for r in r_list]
+
+    if any(s != 0 for s in s_list):
+        # Within each orbit, blocks form one connected component
+        groups: List[List[List[int]]] = [[] for _ in range(g1)]
+        for C in int_clusters:
+            a, _ = _ab(C[0])
+            groups[a].append(C)
+        return g1, B, groups
+
+    # Pure block shifts: q_i = (r_i // Nc) mod B
+    q_shifts = [ (r // Nc) % B for r in r_list ]
+    d = _gcd_many(B, *q_shifts)  # number of block-cycles per orbit
+    num = g1 * d
+    per = B // d
+
+    groups: List[List[List[int]]] = [[] for _ in range(num)]
+    for C in int_clusters:
+        a, b = _ab(C[0])
+        comp_id = a * d + (b % d)  # orbit index + block residue class
+        groups[comp_id].append(C)
+
+    return num, per, groups
 
 
 def generate_clusters(L: int, Nc: int, m_ratio: Tuple[int,int], v_ratios: Union[List[Tuple[int,int]],Tuple[int,int]] = ()):
@@ -103,7 +200,10 @@ def generate_clusters(L: int, Nc: int, m_ratio: Tuple[int,int], v_ratios: Union[
     #Note - this deals with the case of 
     ns = [step_from_ratio(L, vr) for vr in v_ratios]
     #finds the superclusters that fuse under V
-    g, superclusters = fuse_by_hops(int_clusters, L, m, ns)
+    #g, superclusters = fuse_by_hops(int_clusters, L, m, ns,g1=g1,qm=qm,Nc=Nc)num, per, groups = fuse_by_hops(int_clusters=int_clusters, L=16, Nc=2, m=1, ns=[4], g1=g1, qm=qm, use_m_edges=False)
+    g1, qm = gcd(16,1), 16//gcd(16,1)
+    num, per, superclusters = fuse_by_hops(int_clusters, L, Nc, m, ns, g1=g1, qm=qm, use_m_edges=False)
+    
     
     return np.array(superclusters)
     # return {
@@ -113,11 +213,11 @@ def generate_clusters(L: int, Nc: int, m_ratio: Tuple[int,int], v_ratios: Union[
     #     "superclusters_blocks": np.array(superclusters),
     # }
 
-def convert_site_clusters_to_k(site_clusters:np.ndarray)->np.ndarray:
+def convert_site_clusters_to_k(site_clusters:np.ndarray,L:int)->np.ndarray:
     """
     Convert the site clusters to k-space clusters.
     """
-    k_clusters=-np.pi+(2*np.pi/(L))*site_clusters
+    k_clusters=-np.pi+(2*np.pi/L)*site_clusters
     
         
     return k_clusters
@@ -140,9 +240,9 @@ if __name__ == "__main__":
     
     print('testing clustering')
 
-    L=8
+    L=4
     int_cluster_size=2
-    cluster_separation_ratio=(1,8)
+    cluster_separation_ratio=(1,4)
     V_separation_ratio=(1,4)
 
     cluster_validation(L,int_cluster_size,cluster_separation_ratio,V_separation_ratio)
