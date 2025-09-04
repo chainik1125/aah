@@ -564,18 +564,19 @@ def visualize_quspin_couplings_1d_chain(
                         <tr>
                             <th style="background: #667eea; color: white; padding: 8px;">State</th>
 """
-            for label in basis_labels:
-                html += f'                            <th style="background: #667eea; color: white; padding: 8px;">{label}</th>\n'
+            # Standard ordering for column headers (0 to N-1)
+            for i in range(len(basis_labels)):
+                html += f'                            <th style="background: #667eea; color: white; padding: 8px;">{basis_labels[i]}</th>\n'
             
             html += """                        </tr>
                     </thead>
                     <tbody>
 """
             
-            # Add matrix rows
-            for i, label_i in enumerate(basis_labels):
+            # Add matrix rows - standard indexing (0 to N-1)
+            for i in range(len(basis_labels)):
                 html += f'                        <tr>\n'
-                html += f'                            <th style="background: #667eea; color: white; padding: 8px;">{label_i}</th>\n'
+                html += f'                            <th style="background: #667eea; color: white; padding: 8px;">{basis_labels[i]}</th>\n'
                 for j in range(len(basis_labels)):
                     val = H_matrix[i, j]
                     if np.abs(val) < 1e-10:

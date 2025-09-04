@@ -673,12 +673,12 @@ def compute_V_couplings_bruteforce(
 
 if __name__ == "__main__":
     print("testing hamiltonian construction")
-    L=6
+    L=4
     V_0=1
-    int_cluster_size=3
+    int_cluster_size=2
 
-    V_separation_ratio=(1,6)
-    int_separation_ratio=(1,3)
+    V_separation_ratio=(1,2)#(1,6)
+    int_separation_ratio=(1,2)#(1,3)
 
     full_clusters=generate_clusters(L,int_cluster_size,int_separation_ratio,V_separation_ratio)
     full_clusters_k=convert_site_clusters_to_k(full_clusters,L)
