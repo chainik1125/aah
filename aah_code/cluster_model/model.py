@@ -37,11 +37,11 @@ class ClusterModelConfig:
     physical_params: physical parameters (optional argument to add physical parameters)
     In theory it seems better to add these after the clustering since a clustering could take many physical params.
     """
-
+    L:int
     int_cluster_size:int
     cluster_separation_ratio:tuple[int,int] # (numerator, denominator) as fraction of 2π
     V_separation_ratio:tuple[int,int] # e.g., (1, 2) means π spacing
-    L:int
+    
     physical_params:Union[PhysicalParams,None]=None
     ham_lib:str='quspin'
     model_bc:Union[str,'periodic','open']='periodic'

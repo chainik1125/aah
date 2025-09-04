@@ -240,7 +240,7 @@ if __name__ == "__main__":
     
     print('testing clustering')
 
-    L=4
+    L=8
     int_cluster_size=2
     cluster_separation_ratio=(1,4)
     V_separation_ratio=(1,4)

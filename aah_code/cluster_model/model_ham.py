@@ -26,6 +26,9 @@ def make_cluster_ham(supercluster_ks,
     static=[]
 
     super_cluster_size=int(np.prod(supercluster_ks.shape))
+    print(f"Creating basis for super_cluster_size: {super_cluster_size}")
+    print(f"Supercluster k shape: {supercluster_ks.shape}")
+    print(f"Supercluster indices shape: {supercluster_idxs.shape}")
     basis=spinful_fermion_basis_1d(super_cluster_size)
 
     V_sep = int(L * v_sep_ratio[0] / v_sep_ratio[1])
@@ -63,7 +66,7 @@ def make_cluster_ham(supercluster_ks,
     static.append(["n|n", U_list])
 
     #Add onsite mu_0
-    mu_0_list = [[mu_0, i] for i in range(super_cluster_size)]
+    mu_0_list = [[-mu_0, i] for i in range(super_cluster_size)]
     static.append(["n|", mu_0_list])
     static.append(["|n", mu_0_list])
 
@@ -74,7 +77,7 @@ def make_cluster_ham(supercluster_ks,
 
 
 if __name__ == "__main__":
-    L=4
+    L=8
     Nc=2
     t=1.0
     V=0.0
@@ -86,9 +89,14 @@ if __name__ == "__main__":
 
     supercluster_idxs=generate_clusters(L,Nc,int_sep_ratio,v_sep_ratio)[0]
     supercluster_k=convert_site_clusters_to_k(supercluster_idxs,L)
+
+    print(f'supercluster_k: {supercluster_k/np.pi}')
+    print(f'supercluster_idxs: {supercluster_idxs}')
     
 
     H, basis=make_cluster_ham(supercluster_k,supercluster_idxs,t,V,U,mu_0,L,Nc,int_sep_ratio,v_sep_ratio)
+
+    print(f'H shape: {H.toarray().shape}')
 
 
 

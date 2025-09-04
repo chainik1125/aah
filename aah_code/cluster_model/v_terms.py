@@ -13,7 +13,7 @@ from typing import Any
 from aah_code.cluster_model.clustering import step_from_ratio
 from aah_code.cluster_model.clustering import generate_clusters, convert_site_clusters_to_k
 from fractions import Fraction
-from visualization_helpers import visualize_quspin_couplings_1d_chain
+from aah_code.cluster_model.visualization_helpers import visualize_quspin_couplings_1d_chain
 import os
 
 
