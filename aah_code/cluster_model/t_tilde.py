@@ -118,12 +118,12 @@ def alpha_terms_by_separation(supercluster: np.ndarray,
 
 
 if __name__ == "__main__":
-	L=6
-	Nc=3
+	L=8
+	Nc=2
 	t=1.0
 
-	int_sep_ratio=(1,6)  # Test with 1x2 supercluster
-	v_sep_ratio=(1,3)
+	int_sep_ratio=(1,4)  # Test with 1x2 supercluster
+	v_sep_ratio=(1,2)
 
 	supercluster=generate_clusters(L,Nc,int_sep_ratio,v_sep_ratio)[0]
 	supercluster_k=convert_site_clusters_to_k(supercluster,L)

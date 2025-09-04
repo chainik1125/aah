@@ -26,6 +26,8 @@ def make_cluster_ham(supercluster_ks,
     static=[]
 
     super_cluster_size=int(np.prod(supercluster_ks.shape))
+
+
     print(f"Creating basis for super_cluster_size: {super_cluster_size}")
     print(f"Supercluster k shape: {supercluster_ks.shape}")
     print(f"Supercluster indices shape: {supercluster_idxs.shape}")
@@ -44,10 +46,10 @@ def make_cluster_ham(supercluster_ks,
         atol_val=1e-8
     )
 
-    v_terms_static=v_terms["to_quspin_spinful"]
+    # v_terms_static=v_terms["to_quspin_spinful"]
     
     
-    static.extend(v_terms_static)
+    # static.extend(v_terms_static)
 
     t_tilde_terms=alpha_terms_by_separation(supercluster_idxs,supercluster_ks,t,spin='spinful')
     
