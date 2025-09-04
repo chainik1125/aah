@@ -62,6 +62,18 @@ def alpha_terms_by_separation(supercluster: np.ndarray,
     else:
         assert k_phys.shape == (B, Nc)
         k_per_block = k_phys
+    
+    # Create mapping from global indices to local indices
+    # Flatten all unique indices and create a mapping
+    all_indices = supercluster.flatten()
+    unique_indices = np.unique(all_indices)
+    global_to_local = {global_idx: local_idx for local_idx, global_idx in enumerate(unique_indices)}
+    
+    # Create local supercluster with mapped indices
+    local_supercluster = np.zeros_like(supercluster)
+    for b in range(B):
+        for a in range(Nc):
+            local_supercluster[b, a] = global_to_local[supercluster[b, a]]
 
     sep_to_pm: Dict[int, List[List[Union[complex, int]]]] = {s: [] for s in range(Nc)}
     sep_to_n:  Dict[int, List[List[Union[float,   int]]]] = {0: []}
@@ -73,7 +85,7 @@ def alpha_terms_by_separation(supercluster: np.ndarray,
         for a in range(Nc):
             val = float(Hα[a, a].real)
             if abs(val) > tol:
-                g = int(supercluster[b, a])
+                g = int(local_supercluster[b, a])  # Use local indices
                 sep_to_n[0].append([val, g])
 
         # s>0: each unordered pair once (α<β)
@@ -85,8 +97,8 @@ def alpha_terms_by_separation(supercluster: np.ndarray,
                 amp = Hα[bidx, a]
                 if abs(amp) <= tol:
                     continue
-                i = int(supercluster[b, bidx])  # dest (β)
-                j = int(supercluster[b, a])     # src  (α)
+                i = int(local_supercluster[b, bidx])  # dest (β) - use local indices
+                j = int(local_supercluster[b, a])     # src  (α) - use local indices
                 # put BOTH directions in the SAME bucket s
                 sep_to_pm[s].append([complex(amp), i, j])
                 sep_to_pm[s].append([complex(amp.conjugate()), j, i])

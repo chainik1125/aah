@@ -31,6 +31,7 @@ def make_cluster_ham(supercluster_ks,
     print(f"Creating basis for super_cluster_size: {super_cluster_size}")
     print(f"Supercluster k shape: {supercluster_ks.shape}")
     print(f"Supercluster indices shape: {supercluster_idxs.shape}")
+    
     basis=spinful_fermion_basis_1d(super_cluster_size)
 
     V_sep = int(L * v_sep_ratio[0] / v_sep_ratio[1])
@@ -46,10 +47,10 @@ def make_cluster_ham(supercluster_ks,
         atol_val=1e-8
     )
 
-    # v_terms_static=v_terms["to_quspin_spinful"]
+    v_terms_static=v_terms["to_quspin_spinful"]
     
     
-    # static.extend(v_terms_static)
+    static.extend(v_terms_static)
 
     t_tilde_terms=alpha_terms_by_separation(supercluster_idxs,supercluster_ks,t,spin='spinful')
     

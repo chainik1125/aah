@@ -3,8 +3,10 @@ import numpy as np
 
 from aah_code.cluster_model.clustering import generate_clusters,convert_site_clusters_to_k
 from aah_code.cluster_model.model_ham import make_cluster_ham
-from aah_code.hamiltonian import FullSpectrum,SpectrumSolver
+from aah_code.hamiltonian import FullSpectrum,SpectrumSolver,HamiltonianParams,StatesParams,ClusterExperiment,MismatchedQuick,get_spectra
 from aah_code.cluster_model.model import ClusterModelConfig,PhysicalParams
+
+
 
 
 def get_general_spectra(run_config:ClusterModelConfig,return_ham:bool=False):
@@ -20,6 +22,7 @@ def get_general_spectra(run_config:ClusterModelConfig,return_ham:bool=False):
 	mu_0=run_config.physical_params.mu_0
 	t=run_config.physical_params.t
 	L=run_config.L
+	Nc=run_config.int_cluster_size
 	
 	int_sep_ratio=run_config.cluster_separation_ratio
 	v_sep_ratio=run_config.V_separation_ratio
@@ -38,39 +41,43 @@ def get_general_spectra(run_config:ClusterModelConfig,return_ham:bool=False):
 		print(f'cluster_k: {cluster_k/np.pi}')
 		print(f'cluster_indices: {cluster_indices}')
 		sc_cluster_ham,sc_cluster_basis=make_cluster_ham(cluster_k_no_last_dim,cluster_indices,t,V,U,mu_0,L,Nc,int_sep_ratio,v_sep_ratio,ham_lib='quspin')
+
+		input=(sc_cluster_ham,sc_cluster_basis)	
+	
+		solver=SpectrumSolver(input,sc_cluster_basis,ham_lib='quspin')
+		eigvals,eigvecs,n_ups,n_downs,n_tot=solver.solve_spectrum()
 		
-		print(f'sc_cluster_ham shape: {sc_cluster_ham.toarray().shape}')
+		k_points.append(cluster_k)
+		energy_spectrum.append(eigvals)
+		number_spectrum.append(n_tot)
+		spin_spectrum.append(np.array([n_ups,n_downs]))
+		if return_ham:
+			ham_objects.append(sc_cluster_ham)
+
+	k_points=np.stack(k_points,axis=0)
+	energy_spectrum=np.stack(energy_spectrum,axis=0)
+	number_spectrum=np.stack(number_spectrum,axis=0)
+	spin_spectrum=np.stack(spin_spectrum,axis=0)
+
+	if return_ham:
+		return ham_objects
+	else:
+		return k_points,energy_spectrum,number_spectrum,spin_spectrum
 
 
-		
-			
-		
-		
-	# 	solver=SpectrumSolver(test_ham,None,ham_lib)#basis object never explicitly used anyway
-	# 	eigvals,eigvecs,n_ups,n_downs,n_tot=solver.solve_spectrum()
-		
+def get_general_expectations(run_config:ClusterModelConfig):
 
+	spectra_4tuple=get_general_spectra(run_config)
+	
+	#state_params=StatesParams(spin_states=2)
+	physical_params=run_config.physical_params
+	print(f'k points shape: {spectra_4tuple[0].shape},\n energies shape: {spectra_4tuple[1].shape},\n number_spectrum shape: {spectra_4tuple[2].shape}, spin spectrum shape: {spectra_4tuple[3].shape}')
 
-	# 	k_points.append(cluster_k)
-	# 	energy_spectrum.append(eigvals)
-	# 	number_spectrum.append(n_tot)
-	# 	spin_spectrum.append(np.array([n_ups,n_downs]))
-	# 	if return_ham:
-	# 		ham_objects.append(test_ham)
+	full_spectrum_obj=FullSpectrum(None,None,physical_params,None)
+	system_expectations,cluster_expectations=full_spectrum_obj.get_cluster_thermodynamic_expectations(spectra_4tuple,None)
+	
+	return system_expectations,cluster_expectations
 
-			
-		
-	# k_points=np.stack(k_points,axis=0)
-	# energy_spectrum=np.stack(energy_spectrum,axis=0)
-	# number_spectrum=np.stack(number_spectrum,axis=0)
-	# spin_spectrum=np.stack(spin_spectrum,axis=0)
-
-	# #logger.info(f'spin spectrum shape: {spin_spectrum.shape}')
-		
-	# if return_ham:
-	# 	return ham_objects
-	# else:
-	# 	return k_points,energy_spectrum,number_spectrum,spin_spectrum
 
 
 
@@ -186,4 +193,6 @@ if __name__ == "__main__":
 	)
 
 
-	get_general_spectra(run_config)
+	system_expectations,cluster_expectations=get_general_expectations(run_config)
+
+	
