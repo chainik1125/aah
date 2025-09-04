@@ -201,7 +201,7 @@ def generate_clusters(L: int, Nc: int, m_ratio: Tuple[int,int], v_ratios: Union[
     ns = [step_from_ratio(L, vr) for vr in v_ratios]
     #finds the superclusters that fuse under V
     #g, superclusters = fuse_by_hops(int_clusters, L, m, ns,g1=g1,qm=qm,Nc=Nc)num, per, groups = fuse_by_hops(int_clusters=int_clusters, L=16, Nc=2, m=1, ns=[4], g1=g1, qm=qm, use_m_edges=False)
-    g1, qm = gcd(16,1), 16//gcd(16,1)
+    # g1, qm = gcd(16,1), 16//gcd(16,1)  # BUG: This was overriding the correct values from line 198
     num, per, superclusters = fuse_by_hops(int_clusters, L, Nc, m, ns, g1=g1, qm=qm, use_m_edges=False)
     
     

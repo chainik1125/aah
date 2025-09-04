@@ -26,7 +26,8 @@ def visualize_quspin_couplings_1d_chain(
     k_sites_supercluster: Optional[np.ndarray] = None,
     output_file: str = 'v_couplings_visualization.html',
     title: str = 'QuSpin V Coupling Visualization',
-    eps: float = 1e-6
+    eps: float = 1e-6,
+    to_quspin_spinless: Optional[List] = None
 ):
     """
     Enhanced 1D chain visualization of QuSpin spinful coupling terms
@@ -49,6 +50,8 @@ def visualize_quspin_couplings_1d_chain(
         Title for the visualization
     eps : float
         Threshold for filtering out near-zero couplings (default 1e-6)
+    to_quspin_spinless : list, optional
+        The 'to_quspin_spinless' output for building the actual Hamiltonian matrix
     """
     
     # Check if spin sectors are identical
@@ -263,13 +266,15 @@ def visualize_quspin_couplings_1d_chain(
     # Determine cluster structure if provided
     cluster_info = {}
     cluster_colors_map = {}
+    k_value_map = {}  # Map from flat_idx to actual k-value
     if k_sites_supercluster is not None:
         num_clusters, cluster_size = k_sites_supercluster.shape
-        # Flatten to get site to cluster mapping
+        # Map flat index to cluster index AND k-value
         for cluster_idx in range(num_clusters):
             for site_idx in range(cluster_size):
                 flat_idx = cluster_idx * cluster_size + site_idx
                 cluster_info[flat_idx] = cluster_idx
+                k_value_map[flat_idx] = k_sites_supercluster[cluster_idx, site_idx]
         
         # Generate colors for clusters
         cluster_colors_list = generate_distinct_colors(num_clusters)
@@ -282,13 +287,30 @@ def visualize_quspin_couplings_1d_chain(
         <div class="chain-container">
 """
     
-    # Create SVG for chain - center it
-    svg_width = max(900, system_size * 150)
+    # Create SVG for chain - position sites based on k-values
+    if k_value_map:
+        # Get max k-value to determine spacing
+        max_k = max(k_value_map.values())
+        svg_width = max(900, (max_k + 1) * 60)
+    else:
+        svg_width = max(900, system_size * 150)
+    
     svg_height = 300
     site_y = svg_height // 2
-    site_spacing = min(120, (svg_width - 200) // max(1, system_size - 1)) if system_size > 1 else 120
-    total_width = (system_size - 1) * site_spacing if system_size > 1 else 0
-    start_x = (svg_width - total_width) // 2  # Center the chain
+    
+    # Calculate site positions based on k-values
+    if k_value_map:
+        site_x_positions = {}
+        x_scale = (svg_width - 200) / max(1, max(k_value_map.values()))
+        start_x = 100  # Fixed left margin
+        for flat_idx, k_val in k_value_map.items():
+            site_x_positions[flat_idx] = start_x + k_val * x_scale
+    else:
+        # Fallback to sequential positioning
+        site_spacing = min(120, (svg_width - 200) // max(1, system_size - 1)) if system_size > 1 else 120
+        total_width = (system_size - 1) * site_spacing if system_size > 1 else 0
+        start_x = (svg_width - total_width) // 2
+        site_x_positions = {i: start_x + i * site_spacing for i in range(system_size)}
     
     html += f"""
         <svg viewBox="0 0 {svg_width} {svg_height}" xmlns="http://www.w3.org/2000/svg">
@@ -299,26 +321,15 @@ def visualize_quspin_couplings_1d_chain(
             </defs>
 """
     
-    # Draw cluster backgrounds if we have cluster info
+    # Add cluster legend at the top
     if cluster_info:
+        legend_y = 30
+        legend_x_start = 50
         for cluster_idx in range(num_clusters):
-            # Find all sites in this cluster
-            cluster_sites = [i for i, c in cluster_info.items() if c == cluster_idx]
-            if cluster_sites:
-                min_site = min(cluster_sites)
-                max_site = max(cluster_sites)
-                x1 = start_x + min_site * site_spacing - 35
-                x2 = start_x + max_site * site_spacing + 35
-                y1 = site_y - 40
-                height = 80
-                
-                # Draw background rectangle for cluster
-                html += f"""
-            <rect x="{x1}" y="{y1}" width="{x2-x1}" height="{height}" 
-                  fill="{cluster_colors_map[cluster_idx]}" opacity="0.2" rx="10" ry="10"/>
-            <text x="{(x1+x2)/2}" y="{y1-5}" text-anchor="middle" font-size="12" fill="{cluster_colors_map[cluster_idx]}">
-                Cluster {cluster_idx}
-            </text>
+            legend_x = legend_x_start + cluster_idx * 100
+            html += f"""
+            <circle cx="{legend_x}" cy="{legend_y}" r="10" fill="{cluster_colors_map[cluster_idx]}" stroke="#2c3e50" stroke-width="1"/>
+            <text x="{legend_x + 15}" y="{legend_y + 5}" font-size="12" fill="#333">Cluster {cluster_idx}</text>
 """
     
     # Draw chain backbone - only within clusters
@@ -327,27 +338,33 @@ def visualize_quspin_couplings_1d_chain(
             cluster_sites = sorted([i for i, c in cluster_info.items() if c == cluster_idx])
             # Draw lines only within each cluster
             for i in range(len(cluster_sites) - 1):
-                x1 = start_x + cluster_sites[i] * site_spacing
-                x2 = start_x + cluster_sites[i+1] * site_spacing
+                x1 = site_x_positions[cluster_sites[i]]
+                x2 = site_x_positions[cluster_sites[i+1]]
                 html += f"""
             <line x1="{x1}" y1="{site_y}" x2="{x2}" y2="{site_y}" 
                   stroke="#95a5a6" stroke-width="2" stroke-dasharray="5,5"/>
 """
     elif system_size > 1:
         # Fallback if no cluster info - draw full chain
-        html += f"""
-            <line x1="{start_x}" y1="{site_y}" x2="{start_x + (system_size-1)*site_spacing}" y2="{site_y}" 
+        site_positions = sorted(site_x_positions.values())
+        if len(site_positions) > 1:
+            html += f"""
+            <line x1="{site_positions[0]}" y1="{site_y}" x2="{site_positions[-1]}" y2="{site_y}" 
                   stroke="#95a5a6" stroke-width="2" stroke-dasharray="5,5"/>
 """
     
-    # Draw sites with cluster coloring
+    # Draw sites with cluster coloring and k-value labels
     for i in range(system_size):
-        x = start_x + i * site_spacing
+        x = site_x_positions[i]
         # Use cluster color if available, otherwise default blue
         site_color = cluster_colors_map.get(cluster_info.get(i, -1), "#3498db")
+        # Get the k-value and flat index
+        k_label = k_value_map.get(i, i) if k_value_map else i
+        # Show k-value as main label
         html += f"""
             <circle cx="{x}" cy="{site_y}" r="25" fill="{site_color}" stroke="#2c3e50" stroke-width="2"/>
-            <text x="{x}" y="{site_y+5}" text-anchor="middle" fill="white" font-size="16" font-weight="bold">{i}</text>
+            <text x="{x}" y="{site_y+5}" text-anchor="middle" fill="white" font-size="14" font-weight="bold">k={k_label}</text>
+            <text x="{x}" y="{site_y+45}" text-anchor="middle" font-size="10" fill="#555">α={i}</text>
 """
     
     # Draw hopping arrows (curved paths)
@@ -355,8 +372,8 @@ def visualize_quspin_couplings_1d_chain(
         if c['op'] in ['+-|', '+-']:  # Only forward hops (already filtered by eps)
             i, j = c['i'], c['j']
             if i != j:  # Skip on-site terms for arrows
-                x1 = start_x + j * site_spacing  # j is source
-                x2 = start_x + i * site_spacing  # i is target
+                x1 = site_x_positions[j]  # j is source
+                x2 = site_x_positions[i]  # i is target
                 
                 # Calculate curve height based on distance
                 distance = abs(i - j)
@@ -411,8 +428,8 @@ def visualize_quspin_couplings_1d_chain(
                 <tr>
                     <th>Spin</th>
                     <th>Type</th>
-                    <th>Target (i)</th>
-                    <th>Source (j)</th>
+                    <th>Target α (i)</th>
+                    <th>Source α (j)</th>
                     <th>Coefficient</th>
                     <th>Real Part</th>
                     <th>Imag Part</th>
@@ -510,6 +527,114 @@ def visualize_quspin_couplings_1d_chain(
         
         Plotly.newPlot('heatmap', data, layout);
     </script>
+"""
+    
+    # Add QuSpin Hamiltonian matrix if spinless operators provided
+    if to_quspin_spinless is not None:
+        try:
+            from quspin.operators import hamiltonian
+            from quspin.basis import spinless_fermion_basis_1d
+            
+            # Build the Hamiltonian for single particle
+            basis = spinless_fermion_basis_1d(system_size, Nf=1)
+            H = hamiltonian(to_quspin_spinless, [], basis=basis, dtype=np.complex128, check_herm=False, check_symm=False)
+            H_matrix = H.toarray()
+            
+            # Get eigenvalues and eigenvectors
+            eigenvalues, eigenvectors = np.linalg.eigh(H_matrix)
+            
+            # Create basis state labels
+            basis_labels = []
+            for i, state in enumerate(basis.states):
+                for site in range(system_size):
+                    if (state >> site) & 1:
+                        basis_labels.append(f"|{site}⟩")
+                        break
+                else:
+                    basis_labels.append("|vac⟩")
+            
+            html += """
+        <h2>QuSpin Hamiltonian (Single Particle, Spinless)</h2>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 20px 0;">
+            
+            <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
+                <h3>Hamiltonian Matrix</h3>
+                <table style="margin: 10px auto; font-family: monospace;">
+                    <thead>
+                        <tr>
+                            <th style="background: #667eea; color: white; padding: 8px;">State</th>
+"""
+            for label in basis_labels:
+                html += f'                            <th style="background: #667eea; color: white; padding: 8px;">{label}</th>\n'
+            
+            html += """                        </tr>
+                    </thead>
+                    <tbody>
+"""
+            
+            # Add matrix rows
+            for i, label_i in enumerate(basis_labels):
+                html += f'                        <tr>\n'
+                html += f'                            <th style="background: #667eea; color: white; padding: 8px;">{label_i}</th>\n'
+                for j in range(len(basis_labels)):
+                    val = H_matrix[i, j]
+                    if np.abs(val) < 1e-10:
+                        cell_content = "0"
+                        cell_style = "padding: 8px; text-align: center; color: #999;"
+                    else:
+                        if np.abs(np.imag(val)) < 1e-10:
+                            cell_content = f"{np.real(val):.3f}"
+                        else:
+                            cell_content = f"{val:.3f}"
+                        cell_style = "padding: 8px; text-align: center; font-weight: bold; color: #2c3e50;"
+                    html += f'                            <td style="{cell_style}">{cell_content}</td>\n'
+                html += '                        </tr>\n'
+            
+            html += """                    </tbody>
+                </table>
+            </div>
+            
+            <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
+                <h3>Eigenvalues & Properties</h3>
+                <table style="width: 100%; margin: 10px 0;">
+                    <thead>
+                        <tr>
+                            <th style="background: #667eea; color: white; padding: 8px;">Index</th>
+                            <th style="background: #667eea; color: white; padding: 8px;">Eigenvalue</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+"""
+            
+            for i, eigval in enumerate(eigenvalues):
+                html += f"""                        <tr>
+                            <td style="padding: 8px; text-align: center;">{i}</td>
+                            <td style="padding: 8px; text-align: center; font-weight: bold;">{eigval:.6f}</td>
+                        </tr>
+"""
+            
+            html += f"""                    </tbody>
+                </table>
+                
+                <div style="margin-top: 20px; padding: 15px; background: #e8f4fd; border-radius: 5px;">
+                    <h4 style="margin: 0 0 10px 0;">Properties</h4>
+                    <ul style="margin: 5px 0; padding-left: 20px;">
+                        <li>Dimension: {H_matrix.shape[0]} × {H_matrix.shape[1]}</li>
+                        <li>Hermitian: {np.allclose(H_matrix, H_matrix.conj().T)}</li>
+                        <li>Trace: {np.trace(H_matrix):.6f}</li>
+                        <li>Determinant: {np.linalg.det(H_matrix):.6f}</li>
+                        <li>Condition number: {np.linalg.cond(H_matrix):.3e}</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+"""
+            
+        except ImportError:
+            html += """
+        <div class="note" style="background: #fff3cd; border-left: 4px solid #ffc107;">
+            <strong>Note:</strong> QuSpin not available for Hamiltonian matrix display.
+        </div>
 """
     
     html += """
