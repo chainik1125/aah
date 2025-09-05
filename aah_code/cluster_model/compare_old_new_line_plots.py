@@ -8,11 +8,18 @@ import plotly.graph_objects as go
 import plotly.io as pio
 from plotly.subplots import make_subplots
 from typing import Tuple, Optional, List
-from tqdm import tqdm
+try:
+    from tqdm import tqdm
+except ImportError:
+    # Fallback if tqdm is not installed
+    def tqdm(iterable, desc=None):
+        return iterable
 import math
+import os
 from aah_code.cluster_model.model import ClusterModelConfig, PhysicalParams
 from aah_code.cluster_model.run_scripts_me import get_general_expectations, test_quick_mismatched
 from aah_code.hamiltonian import HamiltonianParams
+from aah_code.main import run_cluster_method
 
 # Set plotly to browser renderer (not notebook)
 pio.renderers.default = 'browser'
@@ -20,6 +27,69 @@ pio.renderers.default = 'browser'
 # Silence verbose logging
 import logging
 logging.getLogger('aah').setLevel(logging.WARNING)
+
+
+def get_old_method_results(
+    U: float,
+    V: float, 
+    t: float,
+    L: int,
+    Nc: int,
+    int_sep_ratio: Tuple[int, int],
+    v_sep_ratio: Tuple[int, int]
+) -> Tuple[float, float]:
+    """
+    Select and run the appropriate old method based on the separation ratios.
+    
+    Returns
+    -------
+    energy_per_site, filling_per_site : tuple
+        Energy and filling per site from the old method
+    """
+    mu_0 = U / 2  # Half-filling
+    
+    # Determine which old method to use based on ratios
+    # test_quick_mismatched: int_sep = L/4, v_sep = L/2
+    # run_cluster_method: cluster_k_generator = L/2 (π separation)
+    
+    if v_sep_ratio == (1, 2) and int_sep_ratio == (1, 4):
+        # This matches test_quick_mismatched configuration
+        print("  Using test_quick_mismatched (int_sep=L/4, v_sep=L/2)")
+        physical_params = HamiltonianParams(U=U, V=V, hopping=t, mu_0=mu_0)
+        system_expectations, _ = test_quick_mismatched(
+            lattice_points=L,
+            cluster_size=Nc,
+            physical_params=physical_params,
+            ham_lib='quspin'
+        )
+        energy, filling, _ = system_expectations
+        return energy / L, filling / L
+        
+    elif v_sep_ratio == (1, 2) and int_sep_ratio == (1, 2):
+        # This matches run_cluster_method configuration (π separation)
+        print("  Using run_cluster_method (π separation)")
+        energy, filling = run_cluster_method(
+            U=U, mu_0=mu_0, V=V, t=t, 
+            system_size=L, 
+            ham_lib='quspin'
+        )
+        # run_cluster_method returns total values, need per-site
+        return energy / L, filling / L
+        
+    else:
+        # For other configurations, use test_quick_mismatched as default
+        # but warn the user
+        print(f"  Warning: No exact old method match for int_sep={int_sep_ratio}, v_sep={v_sep_ratio}")
+        print("  Using test_quick_mismatched as fallback")
+        physical_params = HamiltonianParams(U=U, V=V, hopping=t, mu_0=mu_0)
+        system_expectations, _ = test_quick_mismatched(
+            lattice_points=L,
+            cluster_size=Nc,
+            physical_params=physical_params,
+            ham_lib='quspin'
+        )
+        energy, filling, _ = system_expectations
+        return energy / L, filling / L
 
 
 def compare_old_new_line_plots(
@@ -36,6 +106,11 @@ def compare_old_new_line_plots(
     Create line plots comparing old QSpin vs new general QSpin for varying U at fixed V values.
     Each figure shows 2x3 subplots (energy top row, filling bottom row).
     If more than 3 V values, creates multiple figures.
+    
+    The old method is automatically selected based on the separation ratios:
+    - int_sep=(1,4), v_sep=(1,2): Uses test_quick_mismatched (L/4, L/2 separations)
+    - int_sep=(1,2), v_sep=(1,2): Uses run_cluster_method (π separation)
+    - Other configurations: Uses test_quick_mismatched as fallback with warning
     
     Parameters
     ----------
@@ -96,18 +171,15 @@ def compare_old_new_line_plots(
                 mu_0 = U / 2  # Half-filling
                 
                 try:
-                    # Old QSpin method (mismatched)
-                    physical_params_old = HamiltonianParams(U=U, V=V, hopping=t, mu_0=mu_0)
-                    system_expectations_old, _ = test_quick_mismatched(
-                        lattice_points=L,
-                        cluster_size=Nc,
-                        physical_params=physical_params_old,
-                        ham_lib='quspin'
+                    # Old QSpin method (selected based on ratios)
+                    energy_old_per_site, filling_old_per_site = get_old_method_results(
+                        U=U, V=V, t=t, L=L, Nc=Nc,
+                        int_sep_ratio=int_sep_ratio,
+                        v_sep_ratio=v_sep_ratio
                     )
-                    energy_old, filling_old, _ = system_expectations_old
                     # Add mu_0 term back for comparison
-                    energy_old_subtracted = (energy_old + mu_0 * filling_old) / L
-                    filling_old_normalized = filling_old / L
+                    energy_old_subtracted = energy_old_per_site + mu_0 * filling_old_per_site
+                    filling_old_normalized = filling_old_per_site
                     
                     # New General QSpin method
                     physical_params_new = PhysicalParams(U=U, mu_0=mu_0, V=V, t=t)
@@ -271,6 +343,7 @@ def save_line_plots(
     int_sep_ratio: Tuple[int, int] = (1, 4),
     v_sep_ratio: Tuple[int, int] = (1, 2),
     output_prefix: str = 'old_vs_new_line_plots',
+    output_dir: str = 'large_files/plots',
     save_html: bool = True,
     show_plots: bool = True
 ):
@@ -283,6 +356,8 @@ def save_line_plots(
         Same as compare_old_new_line_plots
     output_prefix : str
         Prefix for output HTML files
+    output_dir : str
+        Directory to save HTML files (default: 'large_files/plots')
     save_html : bool
         Whether to save HTML files (default: True)
     show_plots : bool
@@ -299,12 +374,17 @@ def save_line_plots(
         v_sep_ratio=v_sep_ratio
     )
     
+    # Create output directory if saving HTML
+    if save_html:
+        os.makedirs(output_dir, exist_ok=True)
+    
     # Save and/or show each figure
     for i, fig in enumerate(figures):
         if save_html:
             filename = f'{output_prefix}_page_{i+1}.html'
-            fig.write_html(filename)
-            print(f"Saved figure to {filename}")
+            filepath = os.path.join(output_dir, filename)
+            fig.write_html(filepath)
+            print(f"Saved figure to {filepath}")
         
         if show_plots:
             fig.show()
@@ -343,6 +423,7 @@ if __name__ == "__main__":
         int_sep_ratio=(1, 4),
         v_sep_ratio=(1, 2),
         output_prefix='old_vs_new_line_plots',
+        output_dir='large_files/plots',  # Save to large_files/plots
         save_html=True,  # Save HTML files
         show_plots=True  # Display in browser
     )
