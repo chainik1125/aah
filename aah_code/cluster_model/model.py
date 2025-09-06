@@ -44,6 +44,8 @@ class ClusterModelConfig:
     
     physical_params:Union[PhysicalParams,None]=None
     ham_lib:str='quspin'
+    solver_method:str='dense_ED',
+    states_retained:int=4,
     model_bc:Union[str,'periodic','open']='periodic'
     int_cluster_bc:Union[str,'periodic','open']='periodic'
     super_cluster_bc:Union[str,'periodic','open']='periodic'
@@ -106,7 +108,13 @@ class ClusterModel:
         returns: np.ndarray of shape: [d**(super_cluster_size)]
         """
         if self.config.ham_lib=='quspin':
-            eigvals,eigvecs=np.linalg.eigh(hamiltonian.toarray())
+            if self.config.solver_method == 'sparse_ED':
+                # Use sparse solver - get only lowest 16 eigenvalues by default
+                eigvals = hamiltonian.eigsh(k=16, which='SA', return_eigenvectors=False)
+                eigvecs = None  # Not returning eigenvectors for sparse solve
+            else:
+                # Use dense solver
+                eigvals,eigvecs=np.linalg.eigh(hamiltonian.toarray())
         elif self.config.ham_lib=='tenpy':
             raise NotImplementedError('Tenpy solve_hamiltonian is not implemented yet')
         else:

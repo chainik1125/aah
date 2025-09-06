@@ -20,6 +20,7 @@ from compare_old_new_line_plots import save_line_plots, compare_old_new_line_plo
 from aah_code.cluster_model.model import ClusterModelConfig, PhysicalParams
 from aah_code.cluster_model.run_scripts_me import get_general_expectations
 from aah_code.real_space_dmrg import run_dmrg_method
+from aah_code.cluster_model.plots import compare_int_seps_with_dmrg
 
 def three_way_comparison_with_dmrg(
     int_sep_ratio: Tuple[int, int],
@@ -30,6 +31,7 @@ def three_way_comparison_with_dmrg(
     L: int = 20,
     Nc: int = 2,
     chi: int = 32,
+    solver_method: str = 'dense_ED',
     output_dir: str = 'large_files/plots',
     show_plots: bool = True
 ):
@@ -93,8 +95,8 @@ def three_way_comparison_with_dmrg(
             filling_new_per_site = filling_new / L
             
             # DMRG method
-            # Note: DMRG uses V directly as staggered potential (matches v_sep=(1,2))
-            energy_dmrg, filling_dmrg, _ = run_dmrg_method(U, mu_0, V, t, L, chi)
+            # Note: DMRG now uses v_sep_ratio for arbitrary modulation
+            energy_dmrg, filling_dmrg, _ = run_dmrg_method(U, mu_0, V, v_sep_ratio, t, L, chi)
             # DMRG returns per-site quantities already
             energy_dmrg_subtracted = energy_dmrg + mu_0 * filling_dmrg
             
@@ -313,16 +315,38 @@ def old_new_quspin_comparison():
 
 
 if __name__ == "__main__":
-    U_values=np.linspace(0,5,10)
-    V_values=np.array([0.0, 1/2, 2])
-    int_sep_ratio=(1,2)
-    v_sep_ratio=(1,2)
+    L=12
+    Nc=3
+    t=0
+    states_retained=4
+    U_values=np.linspace(0,1,3)
+    V_values=[1,2,3]
+    v_sep_ratio=(1,3)
+    solver_method='sparse_ED'
 
     
     #old_new_quspin_comparison()
-    three_way_comparison_with_dmrg(
-        int_sep_ratio=int_sep_ratio,
+    # three_way_comparison_with_dmrg(
+    #     L=L,
+    #     Nc=Nc,
+    #     int_sep_ratio=int_sep_ratio,
+    #     v_sep_ratio=v_sep_ratio,
+    #     U_values=U_values,
+    #     V_values=V_values,
+    #     solver_method=solver_method
+    # )
+    
+    # Compare different int_sep configurations with DMRG for fixed v_sep
+
+    int_sep_list=[(1,3),(1,6)]
+    compare_int_seps_with_dmrg(
         v_sep_ratio=v_sep_ratio,
+        int_sep_list=int_sep_list,
         U_values=U_values,
-        V_values=V_values
+        V_values=V_values,
+        L=L,
+        Nc=Nc,
+        t=t,
+        solver_method=solver_method,
+        states_retained=states_retained
     )

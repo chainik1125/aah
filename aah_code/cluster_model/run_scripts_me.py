@@ -23,9 +23,10 @@ def get_general_spectra(run_config:ClusterModelConfig,return_ham:bool=False):
 	t=run_config.physical_params.t
 	L=run_config.L
 	Nc=run_config.int_cluster_size
-	
+	solver_method=run_config.solver_method
 	int_sep_ratio=run_config.cluster_separation_ratio
 	v_sep_ratio=run_config.V_separation_ratio
+	states_retained=run_config.states_retained
 
 
 	all_superclusters=generate_clusters(L,Nc,int_sep_ratio,v_sep_ratio)
@@ -44,7 +45,7 @@ def get_general_spectra(run_config:ClusterModelConfig,return_ham:bool=False):
 
 		input=(sc_cluster_ham,sc_cluster_basis)	
 	
-		solver=SpectrumSolver(input,sc_cluster_basis,ham_lib='quspin')
+		solver=SpectrumSolver(input,sc_cluster_basis,ham_lib='quspin',solver_method=solver_method,states_retained=states_retained)
 		eigvals,eigvecs,n_ups,n_downs,n_tot=solver.solve_spectrum()
 		
 		k_points.append(cluster_k)
@@ -173,10 +174,10 @@ if __name__ == "__main__":
 	mu_0=U/2
 	V=2.0
 	t=1.0
-	L=8
+	L=12
 	Nc=2
-	v_sep_ratio=(1,2)
-	int_sep_ratio=(1,4)
+	v_sep_ratio=(1,6)
+	int_sep_ratio=(1,6)
 
 	physical_params=PhysicalParams(U=U,mu_0=mu_0,V=V,t=t)
 
@@ -189,7 +190,8 @@ if __name__ == "__main__":
 		physical_params=physical_params,
 		model_bc='periodic',
 		int_cluster_bc='periodic',
-		super_cluster_bc='periodic'
+		super_cluster_bc='periodic',
+		solver_method='sparse_ED'
 	)
 
 
