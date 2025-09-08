@@ -553,9 +553,8 @@ def visualize_quspin_couplings_1d_chain(
                 else:
                     basis_labels.append("|vac⟩")
             
-            # Reverse to get standard ordering (0, 1, 2, 3, ...)
-            basis_labels = basis_labels[::-1]
-            H_matrix = H_matrix[::-1, ::-1]  # Reverse both rows and columns
+            # Keep original ordering - no reversal needed
+            # The basis states are already in the correct order
             
             html += """
         <h2>QuSpin Hamiltonian (Single Particle, Spinless)</h2>

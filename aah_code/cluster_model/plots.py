@@ -13,7 +13,7 @@ from datetime import datetime
 
 from aah_code.cluster_model.model import ClusterModelConfig, PhysicalParams
 from aah_code.cluster_model.run_scripts_me import get_general_expectations
-from aah_code.real_space_dmrg import run_dmrg_method
+from aah_code.real_space_dmrg import run_dmrg_method, get_gnd
 
 # Configure plotly to work outside of notebooks
 pio.renderers.default = "browser"
@@ -41,7 +41,9 @@ def compare_int_seps_with_dmrg(
     states_retained: int = 4,
     output_dir: str = 'large_files/plots',
     show_plots: bool = True,
-    save_pickle: bool = True
+    save_pickle: bool = True,
+    include_idmrg: bool = True,
+    include_finite_dmrg: bool = False
 ):
     """
     Compare different int_sep setups with iDMRG for a fixed v_sep.
@@ -67,6 +69,10 @@ def compare_int_seps_with_dmrg(
         output_dir: Directory to save plots
         show_plots: Whether to display plots
         save_pickle: Whether to save results to pickle file (default: True)
+        include_idmrg: Whether to include infinite DMRG (iDMRG) calculations (default: True). 
+                      Set to False to only compare cluster methods.
+        include_finite_dmrg: Whether to also include finite DMRG calculations (default: False).
+                            This adds finite-size DMRG results alongside iDMRG.
     
     Returns:
         figures: List of plotly figures
@@ -96,13 +102,22 @@ def compare_int_seps_with_dmrg(
         param_names = {'x': 'U', 'varying': 'V', 'fixed': 't'}
     
     print("=" * 60)
-    print(f"Comparing {len(int_sep_list)} int_sep configurations with iDMRG")
+    if include_idmrg or include_finite_dmrg:
+        dmrg_types = []
+        if include_idmrg:
+            dmrg_types.append("iDMRG")
+        if include_finite_dmrg:
+            dmrg_types.append("finite DMRG")
+        print(f"Comparing {len(int_sep_list)} int_sep configurations with {' and '.join(dmrg_types)}")
+    else:
+        print(f"Comparing {len(int_sep_list)} int_sep configurations (no DMRG)")
     print("=" * 60)
     print(f"System: L={L}, Nc={Nc}")
     print(f"Fixed parameter: {fixed_param_name}={fixed_value}")
     print(f"Fixed v_sep={v_sep_ratio}")
     print(f"Int_sep configurations: {int_sep_list}")
-    print(f"DMRG: chi={chi}")
+    if include_idmrg or include_finite_dmrg:
+        print(f"DMRG: chi={chi}")
     print(f"X-axis ({x_param_name}): {x_values}")
     print(f"Varying parameter ({varying_param_name}): {varying_values}")
     
@@ -112,12 +127,17 @@ def compare_int_seps_with_dmrg(
     
     for vary_val in tqdm(varying_values, desc=f"{varying_param_name} values", position=0, leave=True, ncols=80):
         all_results[vary_val] = {
-            'energies_dmrg': [],
-            'fillings_dmrg': [],
+            'energies_idmrg': [],
+            'fillings_idmrg': [],
             'fixed_value': fixed_value,
             'states_retained': states_retained,
             'Nc': Nc
         }
+        
+        # Add finite DMRG storage if requested
+        if include_finite_dmrg:
+            all_results[vary_val]['energies_finite_dmrg'] = []
+            all_results[vary_val]['fillings_finite_dmrg'] = []
         
         # Initialize storage for each int_sep configuration
         for int_sep in int_sep_list:
@@ -140,22 +160,49 @@ def compare_int_seps_with_dmrg(
             
             mu_0 = U / 2  # Half-filling
             
-            try:
-                # DMRG calculation (same for all int_sep, only depends on v_sep)
-                energy_dmrg, filling_dmrg, _ = run_dmrg_method(U, mu_0, V, v_sep_ratio, t, L, chi)
-                energy_dmrg_subtracted = energy_dmrg + mu_0 * filling_dmrg
-                
-                all_results[vary_val]['energies_dmrg'].append(energy_dmrg_subtracted)
-                all_results[vary_val]['fillings_dmrg'].append(filling_dmrg)
-            except Exception as e:
-                # If DMRG fails, append NaN and record the failure
-                all_results[vary_val]['energies_dmrg'].append(np.nan)
-                all_results[vary_val]['fillings_dmrg'].append(np.nan)
-                failed_calculations.append({
-                    'method': 'DMRG',
-                    'params': {x_param_name: x_val, varying_param_name: vary_val, fixed_param_name: fixed_value},
-                    'error': str(e)
-                })
+            # Infinite DMRG calculation
+            if include_idmrg:
+                try:
+                    # iDMRG calculation (same for all int_sep, only depends on v_sep)
+                    energy_idmrg, filling_idmrg, _ = run_dmrg_method(U, mu_0, V, v_sep_ratio, t, L, chi)
+                    energy_idmrg_subtracted = energy_idmrg + mu_0 * filling_idmrg
+                    
+                    all_results[vary_val]['energies_idmrg'].append(energy_idmrg_subtracted)
+                    all_results[vary_val]['fillings_idmrg'].append(filling_idmrg)
+                except Exception as e:
+                    # If iDMRG fails, append NaN and record the failure
+                    all_results[vary_val]['energies_idmrg'].append(np.nan)
+                    all_results[vary_val]['fillings_idmrg'].append(np.nan)
+                    failed_calculations.append({
+                        'method': 'iDMRG',
+                        'params': {x_param_name: x_val, varying_param_name: vary_val, fixed_param_name: fixed_value},
+                        'error': str(e)
+                    })
+            else:
+                # If not including iDMRG, just append NaN
+                all_results[vary_val]['energies_idmrg'].append(np.nan)
+                all_results[vary_val]['fillings_idmrg'].append(np.nan)
+            
+            # Finite DMRG calculation (optional)
+            if include_finite_dmrg:
+                try:
+                    # Finite DMRG calculation (with actual system size L)
+                    energy_finite, _, filling_finite = get_gnd(L, chi, U, t, mu_0, V, v_sep_ratio)
+                    energy_finite_per_site = energy_finite / L
+                    filling_finite_per_site = filling_finite / L
+                    energy_finite_subtracted = energy_finite_per_site + mu_0 * filling_finite_per_site
+                    
+                    all_results[vary_val]['energies_finite_dmrg'].append(energy_finite_subtracted)
+                    all_results[vary_val]['fillings_finite_dmrg'].append(filling_finite_per_site)
+                except Exception as e:
+                    # If finite DMRG fails, append NaN and record the failure
+                    all_results[vary_val]['energies_finite_dmrg'].append(np.nan)
+                    all_results[vary_val]['fillings_finite_dmrg'].append(np.nan)
+                    failed_calculations.append({
+                        'method': 'Finite DMRG',
+                        'params': {x_param_name: x_val, varying_param_name: vary_val, fixed_param_name: fixed_value},
+                        'error': str(e)
+                    })
             
             # Calculate for each int_sep configuration
             for int_sep in int_sep_list:
@@ -199,7 +246,7 @@ def compare_int_seps_with_dmrg(
     # Create plots
     figures = create_int_sep_comparison_plots(
         x_values, varying_values, all_results, int_sep_list, v_sep_ratio, 
-        output_dir, show_plots, param_names, fixed_value, states_retained, Nc
+        output_dir, show_plots, param_names, fixed_value, states_retained, Nc, L
     )
     
     # Save results to pickle if requested
@@ -242,18 +289,52 @@ def compare_int_seps_with_dmrg(
     
     # Print summary statistics
     print("\n" + "=" * 60)
-    print("Summary Statistics (Mean Absolute Differences from DMRG)")
+    if include_idmrg or include_finite_dmrg:
+        print("Summary Statistics (Mean Absolute Differences)")
+    else:
+        print("Summary Statistics (Cluster Method Comparisons)")
     print("=" * 60)
     
-    for vary_val in varying_values:
-        print(f"\n{varying_param_name}={vary_val:.2f}:")
-        energies_dmrg = np.array(all_results[vary_val]['energies_dmrg'])
-        
-        for int_sep in int_sep_list:
-            int_sep_key = f'int_sep_{int_sep[0]}_{int_sep[1]}'
-            energies_method = np.array(all_results[vary_val][f'energies_{int_sep_key}'])
-            mae = np.nanmean(np.abs(energies_method - energies_dmrg))
-            print(f"  int_sep={int_sep}: MAE={mae:.6f}")
+    if include_idmrg or include_finite_dmrg:
+        for vary_val in varying_values:
+            print(f"\n{varying_param_name}={vary_val:.2f}:")
+            
+            # Compare with iDMRG if available
+            if include_idmrg:
+                energies_idmrg = np.array(all_results[vary_val]['energies_idmrg'])
+                if not np.all(np.isnan(energies_idmrg)):
+                    for int_sep in int_sep_list:
+                        int_sep_key = f'int_sep_{int_sep[0]}_{int_sep[1]}'
+                        energies_method = np.array(all_results[vary_val][f'energies_{int_sep_key}'])
+                        mae = np.nanmean(np.abs(energies_method - energies_idmrg))
+                        print(f"  int_sep={int_sep} vs iDMRG: MAE={mae:.6f}")
+            
+            # Compare with finite DMRG if available
+            if include_finite_dmrg:
+                energies_finite = np.array(all_results[vary_val]['energies_finite_dmrg'])
+                if not np.all(np.isnan(energies_finite)):
+                    for int_sep in int_sep_list:
+                        int_sep_key = f'int_sep_{int_sep[0]}_{int_sep[1]}'
+                        energies_method = np.array(all_results[vary_val][f'energies_{int_sep_key}'])
+                        mae = np.nanmean(np.abs(energies_method - energies_finite))
+                        print(f"  int_sep={int_sep} vs Finite DMRG: MAE={mae:.6f}")
+    else:
+        # When no DMRG, compare cluster methods to each other
+        for vary_val in varying_values:
+            print(f"\n{varying_param_name}={vary_val:.2f}:")
+            # Get energies for all methods
+            method_energies = {}
+            for int_sep in int_sep_list:
+                int_sep_key = f'int_sep_{int_sep[0]}_{int_sep[1]}'
+                method_energies[int_sep] = np.array(all_results[vary_val][f'energies_{int_sep_key}'])
+            
+            # Compare first method to others
+            if len(int_sep_list) > 1:
+                ref_method = int_sep_list[0]
+                ref_energies = method_energies[ref_method]
+                for int_sep in int_sep_list[1:]:
+                    mae = np.nanmean(np.abs(method_energies[int_sep] - ref_energies))
+                    print(f"  {int_sep} vs {ref_method}: MAE={mae:.6f}")
     
     # Report failed calculations
     if failed_calculations:
@@ -286,7 +367,7 @@ def compare_int_seps_with_dmrg(
 def create_int_sep_comparison_plots(
     x_values, varying_values, all_results, int_sep_list, v_sep_ratio,
     output_dir='large_files/plots', show_plots=True, param_names=None,
-    fixed_value=None, states_retained=None, Nc=None
+    fixed_value=None, states_retained=None, Nc=None, L=None
 ):
     """Create line plots comparing different int_sep configurations with DMRG."""
     
@@ -299,6 +380,8 @@ def create_int_sep_comparison_plots(
         states_retained = all_results[varying_values[0]].get('states_retained', 'N/A')
     if Nc is None:
         Nc = all_results[varying_values[0]].get('Nc', 'N/A')
+    if L is None:
+        L = 20  # Default value
     
     # Group varying values into chunks of 3
     n_v_per_fig = 3
@@ -352,34 +435,74 @@ def create_int_sep_comparison_plots(
         for col_idx, vary_val in enumerate(current_varying_values):
             col = col_idx + 1
             
-            # Plot DMRG results
-            # Energy plot (top row)
-            fig.add_trace(
-                go.Scatter(
-                    x=x_values,
-                    y=all_results[vary_val]['energies_dmrg'],
-                    mode='lines+markers',
-                    name='DMRG',
-                    line=dict(color=colors['DMRG'], width=3),
-                    marker=dict(size=8, symbol='diamond'),
-                    showlegend=(col_idx == 0)
-                ),
-                row=1, col=col
-            )
+            # Check if iDMRG data exists and is not all NaN
+            idmrg_energies = all_results[vary_val]['energies_idmrg']
+            has_idmrg_data = not np.all(np.isnan(idmrg_energies))
             
-            # Filling plot (bottom row)
-            fig.add_trace(
-                go.Scatter(
-                    x=x_values,
-                    y=all_results[vary_val]['fillings_dmrg'],
-                    mode='lines+markers',
-                    name='DMRG',
-                    line=dict(color=colors['DMRG'], width=3),
-                    marker=dict(size=8, symbol='diamond'),
-                    showlegend=False
-                ),
-                row=2, col=col
-            )
+            if has_idmrg_data:
+                # Plot iDMRG results
+                # Energy plot (top row)
+                fig.add_trace(
+                    go.Scatter(
+                        x=x_values,
+                        y=idmrg_energies,
+                        mode='lines+markers',
+                        name='iDMRG',
+                        line=dict(color=colors['DMRG'], width=3),
+                        marker=dict(size=8, symbol='diamond'),
+                        showlegend=(col_idx == 0)
+                    ),
+                    row=1, col=col
+                )
+                
+                # Filling plot (bottom row)
+                fig.add_trace(
+                    go.Scatter(
+                        x=x_values,
+                        y=all_results[vary_val]['fillings_idmrg'],
+                        mode='lines+markers',
+                        name='iDMRG',
+                        line=dict(color=colors['DMRG'], width=3),
+                        marker=dict(size=8, symbol='diamond'),
+                        showlegend=False
+                    ),
+                    row=2, col=col
+                )
+            
+            # Check if finite DMRG data exists
+            if 'energies_finite_dmrg' in all_results[vary_val]:
+                finite_dmrg_energies = all_results[vary_val]['energies_finite_dmrg']
+                has_finite_dmrg_data = not np.all(np.isnan(finite_dmrg_energies))
+                
+                if has_finite_dmrg_data:
+                    # Plot finite DMRG results
+                    # Energy plot (top row)
+                    fig.add_trace(
+                        go.Scatter(
+                            x=x_values,
+                            y=finite_dmrg_energies,
+                            mode='lines+markers',
+                            name=f'Finite DMRG (L={L})',
+                            line=dict(color='magenta', width=2, dash='dash'),
+                            marker=dict(size=6, symbol='triangle-up'),
+                            showlegend=(col_idx == 0)
+                        ),
+                        row=1, col=col
+                    )
+                    
+                    # Filling plot (bottom row)
+                    fig.add_trace(
+                        go.Scatter(
+                            x=x_values,
+                            y=all_results[vary_val]['fillings_finite_dmrg'],
+                            mode='lines+markers',
+                            name=f'Finite DMRG (L={L})',
+                            line=dict(color='magenta', width=2, dash='dash'),
+                            marker=dict(size=6, symbol='triangle-up'),
+                            showlegend=False
+                        ),
+                        row=2, col=col
+                    )
             
             # Plot each int_sep configuration
             for idx, int_sep in enumerate(int_sep_list):
@@ -442,9 +565,31 @@ def create_int_sep_comparison_plots(
         # Update layout
         fixed_param_info = f"{param_names['fixed']}={fixed_value}"
         
-        title_text = (f'Cluster Separation Comparison with iDMRG<br>'
-                     f'<sub>v_sep={format_sep_as_pi(v_sep_ratio)}, {fixed_param_info}, '
-                     f'Nc={Nc}, states={states_retained} | Page {fig_idx+1}/{n_figures}</sub>')
+        # Check which DMRG types are present
+        has_idmrg = any(not np.all(np.isnan(all_results[v]['energies_idmrg'])) 
+                       for v in current_varying_values if v in all_results)
+        has_finite_dmrg = any('energies_finite_dmrg' in all_results[v] and 
+                             not np.all(np.isnan(all_results[v]['energies_finite_dmrg']))
+                             for v in current_varying_values if v in all_results)
+        
+        # Build title based on what's included
+        if has_idmrg and has_finite_dmrg:
+            dmrg_label = 'iDMRG & Finite DMRG'
+        elif has_idmrg:
+            dmrg_label = 'iDMRG'
+        elif has_finite_dmrg:
+            dmrg_label = 'Finite DMRG'
+        else:
+            dmrg_label = None
+        
+        if dmrg_label:
+            title_text = (f'Cluster Separation Comparison with {dmrg_label}<br>'
+                         f'<sub>v_sep={format_sep_as_pi(v_sep_ratio)}, {fixed_param_info}, '
+                         f'Nc={Nc}, states={states_retained}, L={L} | Page {fig_idx+1}/{n_figures}</sub>')
+        else:
+            title_text = (f'Cluster Separation Comparison<br>'
+                         f'<sub>v_sep={format_sep_as_pi(v_sep_ratio)}, {fixed_param_info}, '
+                         f'Nc={Nc}, states={states_retained}, L={L} | Page {fig_idx+1}/{n_figures}</sub>')
         
         fig.update_layout(
             title=dict(text=title_text, x=0.5, xanchor='center'),

@@ -8,9 +8,12 @@ import quspin
 from quspin.operators import hamiltonian
 from quspin.basis import spinful_fermion_basis_1d
 from aah_code.cluster_model.clustering import generate_clusters, convert_site_clusters_to_k
-from aah_code.cluster_model.t_tilde import alpha_terms_by_separation
+#from aah_code.cluster_model.t_tilde import alpha_terms_by_separation
 from aah_code.cluster_model.v_terms import compute_V_couplings_bruteforce
 from aah_code.hamiltonian import benchmark_sparse_vs_dense,sparse_diagonalize
+from aah_code.cluster_model.v_terms_test import compute_V_via_matrix_pipeline
+from aah_code.cluster_model.t_tilde_test import alpha_terms_by_separation
+
 
 
 def make_cluster_ham(supercluster_ks,
@@ -39,14 +42,22 @@ def make_cluster_ham(supercluster_ks,
     V_sep = int(L * v_sep_ratio[0] / v_sep_ratio[1])
     int_sep = int(L * int_sep_ratio[0] / int_sep_ratio[1])
 
-    v_terms = compute_V_couplings_bruteforce(
+    # v_terms = compute_V_couplings_bruteforce(
+    #     V_separation=V_sep,
+    #     k_sites_supercluster=supercluster_idxs,
+    #     L=L,
+    #     V0=V,
+    #     spinful=True,
+    #     validate=True,
+    #     atol_val=1e-8
+    # )
+
+    v_terms=compute_V_via_matrix_pipeline(
         V_separation=V_sep,
         k_sites_supercluster=supercluster_idxs,
         L=L,
         V0=V,
-        spinful=True,
-        validate=True,
-        atol_val=1e-8
+        spinful=True
     )
 
     v_terms_static=v_terms["to_quspin_spinful"]

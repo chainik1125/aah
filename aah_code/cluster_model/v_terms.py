@@ -8,7 +8,7 @@ import quspin
 from quspin.operators import hamiltonian
 from quspin.basis import spinful_fermion_basis_1d
 from typing import Tuple, Dict, List, Optional
-from collections import defaultdict
+from collections import defaultdict,deque
 from typing import Any
 from aah_code.cluster_model.clustering import step_from_ratio
 from aah_code.cluster_model.clustering import generate_clusters, convert_site_clusters_to_k
@@ -671,6 +671,169 @@ def compute_V_couplings_bruteforce(
 
     return out
 
+
+
+def _k_to_index_map(row):
+    return {int(k): idx for idx, k in enumerate(row)}
+
+def infer_constant_shift_for_edge(row_src, row_tgt, L, V_sep):
+    """
+    Given two rows (clusters) and V_sep, infer the constant shift d such that
+    b(a) == a + d (mod Nc) for all a (if consistent). Returns d or raises.
+    """
+    Nc = len(row_src)
+    src_map = _k_to_index_map(row_src)
+    tgt_map = _k_to_index_map(row_tgt)
+    d_vals = []
+    for a, k in enumerate(row_src):
+        kp = (int(k) + V_sep) % L
+        if kp not in tgt_map:
+            # not all a connect to this target row; that's ok (another row may own it)
+            continue
+        b = tgt_map[kp]
+        d_vals.append((b - a) % Nc)
+    if not d_vals:
+        raise ValueError("No edges between these two rows under V_sep; cannot infer shift.")
+    d0 = d_vals[0]
+    if any(d != d0 for d in d_vals):
+        raise ValueError(f"Mapping is not a uniform shift: got shifts {d_vals}.")
+    return d0
+
+def align_rows_globally_by_V(k_sites_supercluster, L, V_sep, *, target_shift="auto"):
+    """
+    Rotate each row so that for every V-edge mu->mu', we have b(a) == a + d (mod Nc)
+    with the SAME d across all edges. If target_shift=='auto' we infer d from the
+    first observed edge; else pass an integer d in [0..Nc-1].
+    Returns (A_aligned, rotations, d).
+    """
+    A = np.array(k_sites_supercluster, dtype=int, copy=True)
+    C, Nc = A.shape
+
+    # Build adjacency: for each (mu,a) that hops under V, record its target row mu'
+    idx_maps = [_k_to_index_map(A[mu]) for mu in range(C)]
+    adj = {mu: set() for mu in range(C)}
+    edges = []  # list of (mu, mu') that actually occur
+    for mu in range(C):
+        for a in range(Nc):
+            k = int(A[mu, a])
+            kp = (k + V_sep) % L
+            for mu_p in range(C):
+                if kp in idx_maps[mu_p]:
+                    adj[mu].add(mu_p)
+                    edges.append((mu, mu_p))
+    if not edges:
+        raise ValueError("No V-induced edges inside this supercluster.")
+
+    # Pick target shift d
+    if target_shift == "auto":
+        mu0, mu1 = edges[0]
+        d = infer_constant_shift_for_edge(A[mu0], A[mu1], L, V_sep)
+    else:
+        d = int(target_shift) % Nc
+
+    # BFS rotations so that EVERY edge mu->mu' realizes shift d
+    rotations = np.zeros(C, dtype=int)
+    fixed = np.zeros(C, dtype=bool)
+    fixed[0] = True  # anchor row 0 as reference (rotation=0)
+
+    q = deque([0])
+    while q:
+        mu = q.popleft()
+        # refresh map for current row
+        idx_maps[mu] = _k_to_index_map(A[mu])
+        for mu_p in adj[mu]:
+            if fixed[mu_p]:
+                continue
+            # find required rotation r so that after rotating target row by r:
+            # for any edge a->b_raw, we get (b_raw - r) - a == d  (mod Nc).
+            # Compute r from any connecting a:
+            r_candidates = []
+            for a in range(Nc):
+                k = int(A[mu, a])
+                kp = (k + V_sep) % L
+                if kp in idx_maps[mu_p]:
+                    b_raw = idx_maps[mu_p][kp]
+                    r_candidates.append((b_raw - a - d) % Nc)
+            if not r_candidates:
+                continue  # no actual a from mu go to mu_p
+            r = r_candidates[0]
+            # apply rotation and mark
+            A[mu_p] = np.roll(A[mu_p], -r)
+            rotations[mu_p] = (rotations[mu_p] + r) % Nc
+            fixed[mu_p] = True
+            q.append(mu_p)
+
+    return A, rotations, d
+
+
+
+def compute_V_couplings_bruteforce_aligned(
+    V_separation: int,
+    k_sites_supercluster: np.ndarray,
+    *,
+    L: int,
+    V0: float = 1.0,
+    align_rows: bool = True,
+    target_shift: str | int = "auto",
+    **kw,
+):
+    A = np.asarray(k_sites_supercluster, dtype=int)
+    if align_rows:
+        A, rots, d = align_rows_globally_by_V(A, L=L, V_sep=V_separation, target_shift=target_shift)
+        # you can print/inspect d and rotations if helpful
+    else:
+        d = None
+        rots = None
+    res = compute_V_couplings_bruteforce(
+        V_separation=V_separation,
+        k_sites_supercluster=A,
+        L=L,
+        V0=V0,
+        **kw
+    )
+    res["row_rotations"] = rots
+    res["uniform_shift_d"] = d
+    return res
+
+
+def v_couplings_basis(    V_separation: int,
+    k_sites_supercluster: np.ndarray,   # shape = (num_clusters_in_SC, Nc)
+    interaction_cluster_separation: Optional[int] = None,  # unused; kept for API
+    *,
+    L: Optional[int] = None,            # total number of k points (modulo)
+    V0: float = 1.0,                    # overall amplitude
+    spinful: bool = False,              # emit spinful QuSpin lists too
+    strict: bool = True,                # error if k+n exits this supercluster
+    rtol_prune: float = 0.0, atol_prune: float = 0.0,  # prune tiny coeffs in output
+    atol_val: float = 1e-8             # tolerance for validation
+) -> Dict[str, object]:
+
+    """
+    A more direct and (hopefully) interpretable way to implement the V-term. Four stages.
+    The basic ideas it construct the SP hopping matrixA
+
+    1. Add the V_separation in units of the k site indices (i.e. +n) to each k site.
+    Only do +m because -m is the hermitian conjugate which we'll ad expicitly at the end.
+
+    2. Express the resulting pairs as a matrix of SP hoppings. 
+
+    3. (Optional) Swap rows and colums to make the clusters next to each other 
+    (equiv. use a basis ordering that imposes this.)
+
+    4. Tansform the resulting hopping matrix to the alpha basis as a standard basis transform.
+    (Note: if you choose a basis ordering that groups the clusters this should just be SC/Nc copies
+    of the alpha-basis transform.)
+
+    5. Extract the qupsin terms as the non-zero pairings in that matrix.
+    (Remember that you'll need to reorder by the intial index of the terms if you swapped to align
+    clusters!)
+
+    6. Add the hermitian conjugate of each term.
+
+    7. Return the quspin terms!
+    """
+
+    return None
 def test_v_terms(L=4, V_0=1, int_cluster_size=2, 
                  V_separation_ratio=(1,2), int_separation_ratio=(1,2),
                  visualize=True):
