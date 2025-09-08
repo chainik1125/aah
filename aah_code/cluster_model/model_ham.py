@@ -12,6 +12,7 @@ from aah_code.cluster_model.t_tilde import alpha_terms_by_separation
 from aah_code.cluster_model.v_terms import compute_V_couplings_bruteforce
 from aah_code.hamiltonian import benchmark_sparse_vs_dense,sparse_diagonalize
 
+
 def make_cluster_ham(supercluster_ks,
                     supercluster_idxs,
                     t,
@@ -84,15 +85,15 @@ def make_cluster_ham(supercluster_ks,
 
 
 if __name__ == "__main__":
-    L=12
-    Nc=3
-    t=1.0
+    L=4
+    Nc=2
+    t=0.0
     V=2.0
     U=0.0
     mu_0=0.0
     
-    int_sep_ratio=(1,6)
-    v_sep_ratio=(1,6)
+    int_sep_ratio=(1,2)
+    v_sep_ratio=(1,4)
 
     supercluster_idxs=generate_clusters(L,Nc,int_sep_ratio,v_sep_ratio)[0]
     supercluster_k=convert_site_clusters_to_k(supercluster_idxs,L)
@@ -105,11 +106,14 @@ if __name__ == "__main__":
 
     print(f'H shape: {H.toarray().shape}')
 
-    benchmark_results = benchmark_sparse_vs_dense(H, k=16)
+    
+    
+    
+    #benchmark_results = benchmark_sparse_vs_dense(H, k=16)
 
     # One-line test: Uncomment to run sparse vs dense benchmark
     # benchmark_results = benchmark_sparse_vs_dense(H, k=32)
-    print(f'benchmark_results: {benchmark_results}')
+    #print(f'benchmark_results: {benchmark_results}')
     
     # Or just run sparse diagonalization for the lowest k eigenvalues
     # eigvals_sparse, eigvecs_sparse = sparse_diagonalize(H, k=32)

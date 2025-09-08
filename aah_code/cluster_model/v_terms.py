@@ -778,5 +778,5 @@ if __name__ == "__main__":
     
     
     # Run v_terms test with default parameters
-    #test_v_terms(L=4, V_0=1, int_cluster_size=2, 
-    #             V_separation_ratio=(1,2), int_separation_ratio=(1,2))
+    test_v_terms(L=4, V_0=1, int_cluster_size=2, 
+                V_separation_ratio=(1,4), int_separation_ratio=(1,2))
