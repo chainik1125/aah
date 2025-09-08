@@ -5,151 +5,304 @@ Plotting functions for comparing different cluster model setups with iDMRG.
 import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import plotly.io as pio
 from typing import Tuple, List
 import os
+import pickle
+from datetime import datetime
+
+from aah_code.cluster_model.model import ClusterModelConfig, PhysicalParams
+from aah_code.cluster_model.run_scripts_me import get_general_expectations
+from aah_code.real_space_dmrg import run_dmrg_method
+
+# Configure plotly to work outside of notebooks
+pio.renderers.default = "browser"
+
 try:
     from tqdm import tqdm
 except ImportError:
     def tqdm(iterable, desc=None):
         return iterable
 
-from aah_code.cluster_model.model import ClusterModelConfig, PhysicalParams
-from aah_code.cluster_model.run_scripts_me import get_general_expectations
-from aah_code.real_space_dmrg import run_dmrg_method
-
 
 def compare_int_seps_with_dmrg(
     v_sep_ratio: Tuple[int, int],
     int_sep_list: List[Tuple[int, int]],
-    U_values: np.ndarray,
-    V_values: np.ndarray,
-    t: float = 1.0,
+    U_values: np.ndarray = None,
+    V_values: np.ndarray = None,
+    t: float = None,
+    x_axis: dict = None,
+    varying_parameter: dict = None,
+    fixed_parameter: dict = None,
     L: int = 20,
     Nc: int = 2,
     chi: int = 32,
     solver_method: str = 'dense_ED',
     states_retained: int = 4,
     output_dir: str = 'large_files/plots',
-    show_plots: bool = True
+    show_plots: bool = True,
+    save_pickle: bool = True
 ):
     """
     Compare different int_sep setups with iDMRG for a fixed v_sep.
     
+    Can be called in two ways:
+    1. Legacy mode: Using U_values, V_values, and t directly
+    2. Flexible mode: Using x_axis, varying_parameter, and fixed_parameter dicts
+    
     Args:
         v_sep_ratio: Fixed V separation ratio (e.g., (1,2) for staggered)
         int_sep_list: List of int_sep ratios to compare (e.g., [(1,2), (1,3), (1,4)])
-        U_values: Array of U values to sweep
-        V_values: Array of V values to test
-        t: Hopping parameter
+        U_values: (Legacy) Array of U values to sweep
+        V_values: (Legacy) Array of V values to test
+        t: (Legacy) Hopping parameter
+        x_axis: Dict with single key-value pair for x-axis parameter (e.g., {'U': np.array([...])})
+        varying_parameter: Dict with single key-value pair for subplot parameter (e.g., {'V': np.array([...])})
+        fixed_parameter: Dict with single key-value pair for fixed parameter (e.g., {'t': 1.0})
         L: System size
         Nc: Cluster size
         chi: DMRG bond dimension
         solver_method: Method for solving ('dense_ED' or 'sparse_ED')
+        states_retained: Number of states retained in solver
         output_dir: Directory to save plots
         show_plots: Whether to display plots
+        save_pickle: Whether to save results to pickle file (default: True)
     
     Returns:
         figures: List of plotly figures
         all_results: Dictionary with all computed results
     """
     
+    # Handle parameter input modes
+    if x_axis is not None and varying_parameter is not None and fixed_parameter is not None:
+        # New flexible mode
+        x_param_name, x_values = next(iter(x_axis.items()))
+        varying_param_name, varying_values = next(iter(varying_parameter.items()))
+        fixed_param_name, fixed_value = next(iter(fixed_parameter.items()))
+        
+        # Convert to numpy arrays if they're lists
+        x_values = np.array(x_values) if isinstance(x_values, list) else x_values
+        varying_values = np.array(varying_values) if isinstance(varying_values, list) else varying_values
+        
+        # Create parameter mapping
+        param_names = {'x': x_param_name, 'varying': varying_param_name, 'fixed': fixed_param_name}
+    else:
+        # Legacy mode
+        if U_values is None or V_values is None or t is None:
+            raise ValueError("Must provide either (U_values, V_values, t) or (x_axis, varying_parameter, fixed_parameter)")
+        x_param_name, x_values = 'U', U_values
+        varying_param_name, varying_values = 'V', V_values
+        fixed_param_name, fixed_value = 't', t
+        param_names = {'x': 'U', 'varying': 'V', 'fixed': 't'}
+    
     print("=" * 60)
     print(f"Comparing {len(int_sep_list)} int_sep configurations with iDMRG")
     print("=" * 60)
-    print(f"System: L={L}, Nc={Nc}, t={t}")
+    print(f"System: L={L}, Nc={Nc}")
+    print(f"Fixed parameter: {fixed_param_name}={fixed_value}")
     print(f"Fixed v_sep={v_sep_ratio}")
     print(f"Int_sep configurations: {int_sep_list}")
     print(f"DMRG: chi={chi}")
-    print(f"U values: {U_values}")
-    print(f"V values: {V_values}")
+    print(f"X-axis ({x_param_name}): {x_values}")
+    print(f"Varying parameter ({varying_param_name}): {varying_values}")
     
-    # Storage for all results
+    # Storage for all results and failed calculations
     all_results = {}
+    failed_calculations = []
     
-    for V in tqdm(V_values, desc="V values", position=0, leave=True, ncols=80):
-        all_results[V] = {
+    for vary_val in tqdm(varying_values, desc=f"{varying_param_name} values", position=0, leave=True, ncols=80):
+        all_results[vary_val] = {
             'energies_dmrg': [],
-            'fillings_dmrg': []
+            'fillings_dmrg': [],
+            'fixed_value': fixed_value,
+            'states_retained': states_retained,
+            'Nc': Nc
         }
         
         # Initialize storage for each int_sep configuration
         for int_sep in int_sep_list:
             int_sep_key = f'int_sep_{int_sep[0]}_{int_sep[1]}'
-            all_results[V][f'energies_{int_sep_key}'] = []
-            all_results[V][f'fillings_{int_sep_key}'] = []
+            all_results[vary_val][f'energies_{int_sep_key}'] = []
+            all_results[vary_val][f'fillings_{int_sep_key}'] = []
         
-        for U in tqdm(U_values, desc=f"  U (V={V:.2f})", position=1, leave=False, ncols=80):
+        for x_val in tqdm(x_values, desc=f"  {x_param_name} ({varying_param_name}={vary_val:.2f})", position=1, leave=False, ncols=80):
+            # Build parameter dict for current iteration
+            params = {
+                x_param_name: x_val,
+                varying_param_name: vary_val,
+                fixed_param_name: fixed_value
+            }
+            
+            # Extract U, V, t from params (with defaults if not present)
+            U = params.get('U', 0.0)
+            V = params.get('V', 0.0)
+            t = params.get('t', 1.0)
+            
             mu_0 = U / 2  # Half-filling
             
-            # DMRG calculation (same for all int_sep, only depends on v_sep)
-            energy_dmrg, filling_dmrg, _ = run_dmrg_method(U, mu_0, V, v_sep_ratio, t, L, chi)
-            energy_dmrg_subtracted = energy_dmrg + mu_0 * filling_dmrg
-            
-            all_results[V]['energies_dmrg'].append(energy_dmrg_subtracted)
-            all_results[V]['fillings_dmrg'].append(filling_dmrg)
+            try:
+                # DMRG calculation (same for all int_sep, only depends on v_sep)
+                energy_dmrg, filling_dmrg, _ = run_dmrg_method(U, mu_0, V, v_sep_ratio, t, L, chi)
+                energy_dmrg_subtracted = energy_dmrg + mu_0 * filling_dmrg
+                
+                all_results[vary_val]['energies_dmrg'].append(energy_dmrg_subtracted)
+                all_results[vary_val]['fillings_dmrg'].append(filling_dmrg)
+            except Exception as e:
+                # If DMRG fails, append NaN and record the failure
+                all_results[vary_val]['energies_dmrg'].append(np.nan)
+                all_results[vary_val]['fillings_dmrg'].append(np.nan)
+                failed_calculations.append({
+                    'method': 'DMRG',
+                    'params': {x_param_name: x_val, varying_param_name: vary_val, fixed_param_name: fixed_value},
+                    'error': str(e)
+                })
             
             # Calculate for each int_sep configuration
             for int_sep in int_sep_list:
                 int_sep_key = f'int_sep_{int_sep[0]}_{int_sep[1]}'
                 
-                physical_params = PhysicalParams(U=U, mu_0=mu_0, V=V, t=t)
-                run_config = ClusterModelConfig(
-                    L=L,
-                    int_cluster_size=Nc,
-                    cluster_separation_ratio=int_sep,
-                    V_separation_ratio=v_sep_ratio,
-                    ham_lib='quspin',
-                    physical_params=physical_params,
-                    model_bc='periodic',
-                    int_cluster_bc='periodic',
-                    super_cluster_bc='periodic',
-                    solver_method=solver_method,
-                    states_retained=states_retained
-                )
-                
-                system_expectations, _ = get_general_expectations(run_config)
-                energy, filling, _ = system_expectations
-                energy_subtracted = (energy + mu_0 * filling) / L
-                filling_per_site = filling / L
-                
-                all_results[V][f'energies_{int_sep_key}'].append(energy_subtracted)
-                all_results[V][f'fillings_{int_sep_key}'].append(filling_per_site)
+                try:
+                    physical_params = PhysicalParams(U=U, mu_0=mu_0, V=V, t=t)
+                    run_config = ClusterModelConfig(
+                        L=L,
+                        int_cluster_size=Nc,
+                        cluster_separation_ratio=int_sep,
+                        V_separation_ratio=v_sep_ratio,
+                        ham_lib='quspin',
+                        physical_params=physical_params,
+                        model_bc='periodic',
+                        int_cluster_bc='periodic',
+                        super_cluster_bc='periodic',
+                        solver_method=solver_method,
+                        states_retained=states_retained
+                    )
+                    
+                    system_expectations, _ = get_general_expectations(run_config)
+                    energy, filling, _ = system_expectations
+                    energy_subtracted = (energy + mu_0 * filling) / L
+                    filling_per_site = filling / L
+                    
+                    all_results[vary_val][f'energies_{int_sep_key}'].append(energy_subtracted)
+                    all_results[vary_val][f'fillings_{int_sep_key}'].append(filling_per_site)
+                except Exception as e:
+                    # If calculation fails, append NaN and record the failure
+                    all_results[vary_val][f'energies_{int_sep_key}'].append(np.nan)
+                    all_results[vary_val][f'fillings_{int_sep_key}'].append(np.nan)
+                    failed_calculations.append({
+                        'method': f'int_sep={int_sep}',
+                        'params': {x_param_name: x_val, varying_param_name: vary_val, fixed_param_name: fixed_value},
+                        'error': str(e)
+                    })
     
     print("\n")  # Add spacing after progress bars
     
     # Create plots
     figures = create_int_sep_comparison_plots(
-        U_values, V_values, all_results, int_sep_list, v_sep_ratio, 
-        output_dir, show_plots
+        x_values, varying_values, all_results, int_sep_list, v_sep_ratio, 
+        output_dir, show_plots, param_names, fixed_value, states_retained, Nc
     )
+    
+    # Save results to pickle if requested
+    if save_pickle:
+        pickle_dir = 'large_files/runs/comparisons_general'
+        os.makedirs(pickle_dir, exist_ok=True)
+        
+        # Create timestamp for filename
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        
+        # Create descriptive filename
+        v_sep_str = f"{v_sep_ratio[0]}_{v_sep_ratio[1]}"
+        pickle_filename = f"comparison_v_sep_{v_sep_str}_L{L}_Nc{Nc}_{timestamp}.pkl"
+        pickle_path = os.path.join(pickle_dir, pickle_filename)
+        
+        # Prepare data to save
+        pickle_data = {
+            'all_results': all_results,
+            'parameters': {
+                'v_sep_ratio': v_sep_ratio,
+                'int_sep_list': int_sep_list,
+                x_param_name: x_values.tolist() if hasattr(x_values, 'tolist') else x_values,
+                varying_param_name: varying_values.tolist() if hasattr(varying_values, 'tolist') else varying_values,
+                fixed_param_name: fixed_value,
+                'L': L,
+                'Nc': Nc,
+                'chi': chi,
+                'solver_method': solver_method,
+                'states_retained': states_retained,
+                'param_names': param_names
+            },
+            'timestamp': timestamp
+        }
+        
+        # Save to pickle file
+        with open(pickle_path, 'wb') as f:
+            pickle.dump(pickle_data, f)
+        
+        print(f"\nSaved results to: {pickle_path}")
     
     # Print summary statistics
     print("\n" + "=" * 60)
     print("Summary Statistics (Mean Absolute Differences from DMRG)")
     print("=" * 60)
     
-    for V in V_values:
-        print(f"\nV={V:.2f}:")
-        energies_dmrg = np.array(all_results[V]['energies_dmrg'])
+    for vary_val in varying_values:
+        print(f"\n{varying_param_name}={vary_val:.2f}:")
+        energies_dmrg = np.array(all_results[vary_val]['energies_dmrg'])
         
         for int_sep in int_sep_list:
             int_sep_key = f'int_sep_{int_sep[0]}_{int_sep[1]}'
-            energies_method = np.array(all_results[V][f'energies_{int_sep_key}'])
+            energies_method = np.array(all_results[vary_val][f'energies_{int_sep_key}'])
             mae = np.nanmean(np.abs(energies_method - energies_dmrg))
             print(f"  int_sep={int_sep}: MAE={mae:.6f}")
+    
+    # Report failed calculations
+    if failed_calculations:
+        print("\n" + "=" * 60)
+        print("WARNING: Some calculations failed to converge")
+        print("=" * 60)
+        
+        # Group failures by method
+        failures_by_method = {}
+        for failure in failed_calculations:
+            method = failure['method']
+            if method not in failures_by_method:
+                failures_by_method[method] = []
+            failures_by_method[method].append(failure)
+        
+        for method, failures in failures_by_method.items():
+            print(f"\n{method}:")
+            for failure in failures:
+                params_str = ', '.join([f"{k}={v}" for k, v in failure['params'].items()])
+                error_msg = failure['error'].split('\n')[0]  # Just first line of error
+                print(f"  Failed at {params_str}")
+                print(f"    Error: {error_msg}")
+        
+        print(f"\nTotal failed calculations: {len(failed_calculations)}")
+        print("Note: Failed points are marked as NaN in the results and excluded from plots")
     
     return figures, all_results
 
 
 def create_int_sep_comparison_plots(
-    U_values, V_values, all_results, int_sep_list, v_sep_ratio,
-    output_dir='large_files/plots', show_plots=True
+    x_values, varying_values, all_results, int_sep_list, v_sep_ratio,
+    output_dir='large_files/plots', show_plots=True, param_names=None,
+    fixed_value=None, states_retained=None, Nc=None
 ):
     """Create line plots comparing different int_sep configurations with DMRG."""
     
-    # Group V values into chunks of 3
+    # Handle backward compatibility
+    if param_names is None:
+        param_names = {'x': 'U', 'varying': 'V', 'fixed': 't'}
+    if fixed_value is None:
+        fixed_value = all_results[varying_values[0]].get('fixed_value', 'N/A')
+    if states_retained is None:
+        states_retained = all_results[varying_values[0]].get('states_retained', 'N/A')
+    if Nc is None:
+        Nc = all_results[varying_values[0]].get('Nc', 'N/A')
+    
+    # Group varying values into chunks of 3
     n_v_per_fig = 3
-    n_figures = np.ceil(len(V_values) / n_v_per_fig).astype(int)
+    n_figures = np.ceil(len(varying_values) / n_v_per_fig).astype(int)
     figures = []
     
     # Create output directory
@@ -181,13 +334,13 @@ def create_int_sep_comparison_plots(
     
     for fig_idx in range(n_figures):
         start_idx = fig_idx * n_v_per_fig
-        end_idx = min(start_idx + n_v_per_fig, len(V_values))
-        current_V_values = V_values[start_idx:end_idx]
-        n_cols = len(current_V_values)
+        end_idx = min(start_idx + n_v_per_fig, len(varying_values))
+        current_varying_values = varying_values[start_idx:end_idx]
+        n_cols = len(current_varying_values)
         
         # Create subplot titles
-        energy_titles = [f'Energy/site vs U (V={V:.2f})' for V in current_V_values]
-        filling_titles = [f'Filling/site vs U (V={V:.2f})' for V in current_V_values]
+        energy_titles = [f'Energy/site vs {param_names["x"]} ({param_names["varying"]}={v:.2f})' for v in current_varying_values]
+        filling_titles = [f'Filling/site vs {param_names["x"]} ({param_names["varying"]}={v:.2f})' for v in current_varying_values]
         
         fig = make_subplots(
             rows=2, cols=n_cols,
@@ -196,15 +349,15 @@ def create_int_sep_comparison_plots(
             horizontal_spacing=0.12
         )
         
-        for col_idx, V in enumerate(current_V_values):
+        for col_idx, vary_val in enumerate(current_varying_values):
             col = col_idx + 1
             
             # Plot DMRG results
             # Energy plot (top row)
             fig.add_trace(
                 go.Scatter(
-                    x=U_values,
-                    y=all_results[V]['energies_dmrg'],
+                    x=x_values,
+                    y=all_results[vary_val]['energies_dmrg'],
                     mode='lines+markers',
                     name='DMRG',
                     line=dict(color=colors['DMRG'], width=3),
@@ -217,8 +370,8 @@ def create_int_sep_comparison_plots(
             # Filling plot (bottom row)
             fig.add_trace(
                 go.Scatter(
-                    x=U_values,
-                    y=all_results[V]['fillings_dmrg'],
+                    x=x_values,
+                    y=all_results[vary_val]['fillings_dmrg'],
                     mode='lines+markers',
                     name='DMRG',
                     line=dict(color=colors['DMRG'], width=3),
@@ -242,8 +395,8 @@ def create_int_sep_comparison_plots(
                 # Energy plot (top row)
                 fig.add_trace(
                     go.Scatter(
-                        x=U_values,
-                        y=all_results[V][f'energies_{int_sep_key}'],
+                        x=x_values,
+                        y=all_results[vary_val][f'energies_{int_sep_key}'],
                         mode='lines+markers',
                         name=label,
                         line=dict(
@@ -260,8 +413,8 @@ def create_int_sep_comparison_plots(
                 # Filling plot (bottom row)
                 fig.add_trace(
                     go.Scatter(
-                        x=U_values,
-                        y=all_results[V][f'fillings_{int_sep_key}'],
+                        x=x_values,
+                        y=all_results[vary_val][f'fillings_{int_sep_key}'],
                         mode='lines+markers',
                         name=label,
                         line=dict(
@@ -276,8 +429,8 @@ def create_int_sep_comparison_plots(
                 )
             
             # Update axes labels
-            fig.update_xaxes(title_text='U', row=1, col=col)
-            fig.update_xaxes(title_text='U', row=2, col=col)
+            fig.update_xaxes(title_text=param_names['x'], row=1, col=col)
+            fig.update_xaxes(title_text=param_names['x'], row=2, col=col)
             
             # Set y-axis range for filling plots
             fig.update_yaxes(range=[0, 2], row=2, col=col)
@@ -287,8 +440,11 @@ def create_int_sep_comparison_plots(
                 fig.update_yaxes(title_text='Filling/site', row=2, col=col)
         
         # Update layout
-        title_text = (f'Int_sep Comparison with DMRG (v_sep={format_sep_as_pi(v_sep_ratio)}, '
-                     f'Page {fig_idx+1}/{n_figures})')
+        fixed_param_info = f"{param_names['fixed']}={fixed_value}"
+        
+        title_text = (f'Cluster Separation Comparison with iDMRG<br>'
+                     f'<sub>v_sep={format_sep_as_pi(v_sep_ratio)}, {fixed_param_info}, '
+                     f'Nc={Nc}, states={states_retained} | Page {fig_idx+1}/{n_figures}</sub>')
         
         fig.update_layout(
             title=dict(text=title_text, x=0.5, xanchor='center'),
@@ -307,7 +463,8 @@ def create_int_sep_comparison_plots(
         
         # Save and/or show
         v_sep_str = f"{v_sep_ratio[0]}_{v_sep_ratio[1]}"
-        filename = f'int_sep_comparison_v_sep_{v_sep_str}_page_{fig_idx+1}.html'
+        fixed_str = f"{param_names['fixed']}_{fixed_value}".replace('.', 'p')
+        filename = f'int_sep_comparison_v_sep_{v_sep_str}_{fixed_str}_Nc{Nc}_page_{fig_idx+1}.html'
         filepath = os.path.join(output_dir, filename)
         fig.write_html(filepath)
         print(f"Saved figure to {filepath}")
