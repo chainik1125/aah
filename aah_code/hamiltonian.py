@@ -342,13 +342,13 @@ class SpectrumSolver():
 	Class that will solve for the spectrum
 	save: either false or folder path
 	"""
-	def __init__(self,hamiltonian,cluster_object:LocalClusterBasis,ham_lib:str='tenpy',states_retained:Union[int,'all']='all',save:Union[bool,str]=False):
+	def __init__(self,hamiltonian,cluster_object:LocalClusterBasis,ham_lib:str='tenpy',solver_method='dense_ED',states_retained:Union[int,'all']=4,save:Union[bool,str]=False):
 		self.hamiltonian=hamiltonian
 		self.states_retained=states_retained
 		self.cluster_object=cluster_object
 		self.save=save
 		self.ham_lib=ham_lib
-
+		self.solver_method=solver_method
 	def solve_spectrum(self):
 		if self.ham_lib=='tenpy':
 			#np_ham=tp.algorithms.exact_diag.get_numpy_Hamiltonian(self.hamiltonian)
@@ -391,7 +391,15 @@ class SpectrumSolver():
 			
 			ham,basis=self.hamiltonian
 			ed_ham=ham.toarray()
-			eigvals,eigvecs=np.linalg.eigh(ed_ham)
+
+			if self.solver_method=='dense_ED':
+				eigvals,eigvecs=np.linalg.eigh(ed_ham)
+				print(f"Dense ED: computed {len(eigvals)} eigenvalues")
+			elif self.solver_method=='sparse_ED':
+				eigvals,eigvecs=sparse_diagonalize(ham,k=self.states_retained,return_eigenvectors=True)
+				print(f"Sparse ED: computed {len(eigvals)} eigenvalues")
+			else:
+				raise ValueError(f'Solver method {self.solver_method} not implemented yet')
 			  # After getting eigenvalues and eigenvectors
 
 			# Simplified approach: construct total number operators directly
@@ -696,7 +704,144 @@ def test_quick_mismatched(lattice_points,cluster_size,physical_params,ham_lib:st
 	# 	f"system spin density:{system_expectations[2]/lattice_points}")
 
 
-	
+def sparse_diagonalize(H, k=4, which='SA', return_eigenvectors=True):
+    """
+    Diagonalize a sparse Hamiltonian using sparse eigensolvers.
+    
+    Parameters
+    ----------
+    H : quspin hamiltonian or scipy.sparse matrix
+        The Hamiltonian to diagonalize
+    k : int
+        Number of eigenvalues/eigenvectors to compute (default: 16)
+    which : str
+        Which eigenvalues to find: 'SA' (smallest algebraic, default), 
+        'LA' (largest algebraic), 'SM' (smallest magnitude), etc.
+    return_eigenvectors : bool
+        Whether to return eigenvectors (default: True)
+    
+    Returns
+    -------
+    eigenvalues : np.ndarray
+        The k lowest eigenvalues
+    eigenvectors : np.ndarray (if return_eigenvectors=True)
+        The corresponding eigenvectors
+    """
+    from scipy.sparse.linalg import eigsh
+    from scipy.sparse import csr_matrix
+    import time
+    
+    # Convert to sparse matrix if it's a quspin hamiltonian
+    if hasattr(H, 'tocsr'):
+        H_sparse = H.tocsr()
+    elif hasattr(H, 'toarray'):
+        # If it's already sparse-like but not csr
+        H_sparse = csr_matrix(H.toarray())
+    else:
+        # Assume it's already a sparse matrix
+        H_sparse = H
+    
+    # Ensure k is not larger than matrix dimension - 1
+    n_dim = H_sparse.shape[0]
+    k_actual = min(k, n_dim - 1)
+    
+    if k_actual < k:
+        print(f"Warning: Requested k={k} but matrix dimension is {n_dim}. Using k={k_actual}")
+    
+    # Create a non-zero initial vector to avoid ARPACK error -9
+    # Use a random vector with small perturbation to avoid exact zeros
+    v0 = np.random.RandomState(42).randn(n_dim) + 0.1
+    v0 = v0 / np.linalg.norm(v0)  # Normalize
+    
+    # Use sparse eigenvalue solver with explicit initial vector
+    try:
+        if return_eigenvectors:
+            eigenvalues, eigenvectors = eigsh(H_sparse, k=k_actual, which=which, 
+                                             v0=v0, return_eigenvectors=True,
+                                             tol=1e-10, maxiter=10000)
+            # Sort by eigenvalue
+            idx = eigenvalues.argsort()
+            return eigenvalues[idx], eigenvectors[:, idx]
+        else:
+            eigenvalues = eigsh(H_sparse, k=k_actual, which=which,
+                              v0=v0, return_eigenvectors=False,
+                              tol=1e-10, maxiter=10000)
+            return np.sort(eigenvalues)
+    except Exception as e:
+        # If sparse solver fails, try with different parameters
+        print(f"Warning: Sparse solver failed with error: {e}")
+        print("Attempting with relaxed tolerance and different initial vector...")
+        
+        # Try with a different random seed and relaxed tolerance
+        v0_alt = np.ones(n_dim) + 0.01 * np.random.RandomState(123).randn(n_dim)
+        v0_alt = v0_alt / np.linalg.norm(v0_alt)
+        
+        if return_eigenvectors:
+            eigenvalues, eigenvectors = eigsh(H_sparse, k=k_actual, which=which,
+                                             v0=v0_alt, return_eigenvectors=True,
+                                             tol=1e-8, maxiter=5000)
+            idx = eigenvalues.argsort()
+            return eigenvalues[idx], eigenvectors[:, idx]
+        else:
+            eigenvalues = eigsh(H_sparse, k=k_actual, which=which,
+                              v0=v0_alt, return_eigenvectors=False,
+                              tol=1e-8, maxiter=5000)
+            return np.sort(eigenvalues)
+
+
+def benchmark_sparse_vs_dense(H, k=16):
+    """
+    Compare performance of sparse vs dense eigensolvers.
+    
+    Parameters
+    ----------
+    H : quspin hamiltonian
+        The Hamiltonian to benchmark
+    k : int
+        Number of eigenvalues for sparse solver
+    
+    Returns
+    -------
+    dict
+        Dictionary with timing and eigenvalue results
+    """
+    import time
+    
+    results = {}
+    
+    # Dense diagonalization
+    print("Running dense diagonalization...")
+    start_time = time.time()
+    H_dense = H.toarray()
+    eigvals_dense, _ = np.linalg.eigh(H_dense)
+    dense_time = time.time() - start_time
+    results['dense_time'] = dense_time
+    results['dense_eigvals'] = eigvals_dense[:k]  # First k eigenvalues
+    
+    print(f"Dense diagonalization took {dense_time:.3f} seconds")
+    
+    # Sparse diagonalization
+    print(f"Running sparse diagonalization (k={k})...")
+    start_time = time.time()
+    eigvals_sparse, _ = sparse_diagonalize(H, k=k)
+    sparse_time = time.time() - start_time
+    results['sparse_time'] = sparse_time
+    results['sparse_eigvals'] = eigvals_sparse
+    
+    print(f"Sparse diagonalization took {sparse_time:.3f} seconds")
+    
+    # Compare results
+    speedup = dense_time / sparse_time
+    print(f"\nSpeedup: {speedup:.2f}x")
+    
+    # Check accuracy
+    max_diff = np.max(np.abs(results['dense_eigvals'] - results['sparse_eigvals']))
+    print(f"Maximum eigenvalue difference: {max_diff:.2e}")
+    
+    results['speedup'] = speedup
+    results['max_diff'] = max_diff
+    
+    return results
 		
 	
 def inspect_hamiltonian_terms(hamiltonian):

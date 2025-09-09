@@ -17,6 +17,15 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from tqdm import tqdm
 
+
+def aah_potential_integer_angle(V, V_sep, L_cells, phi=0.0):
+    p, q = map(int, V_sep)
+    i = np.arange(L_cells, dtype=int)
+    residue = (p * (i % q)) % q                         # pure integer arithmetic
+    angles = (2*np.pi / q) * residue + phi              # single float conversion
+    pot = V * np.cos(angles)
+    return pot
+
 class RealSpaceHubbard1D(CouplingMPOModel, NearestNeighborModel):
 	"""
 	Input is a dictionary called model_params that includes:
@@ -56,8 +65,24 @@ class RealSpaceHubbard1D(CouplingMPOModel, NearestNeighborModel):
 			self.add_onsite(-mu, v, 'Nd')  # chemical potential n_down
 
 		L_cells=self.lat.Ls[0]
-		if abs(V) > 0:
-			# shape (L_cells,)  →  [+V/2, -V/2, +V/2, …]
+		V_sep=model_params.get('V_sep', None)
+		if V_sep is not None:
+			# if isinstance(V_sep, tuple) and len(V_sep) == 2:
+			# 	p,q=V_sep
+			# 	alpha=float(p)/float(q)
+			# else:
+			# 	raise ValueError("V_sep must be a tuple of two integers")
+			
+			# V_array=V*np.cos(2*np.pi*alpha*np.arange(L_cells))
+			# # shape (L_cells,)  →  [+V/2, -V/2, +V/2, …]
+			# stagger = np.asarray([V_array[x] for x in range(L_cells) ])
+
+			V_array=aah_potential_integer_angle(V, V_sep, L_cells)
+			for alpha in range(len(self.lat.unit_cell)):      # usually alpha == 0
+				self.add_onsite(V_array, alpha, 'Nu')         # n↑   term
+				self.add_onsite(V_array, alpha, 'Nd')         # n↓   term
+		#Old way of doing it which assumes pi modulation
+		elif abs(V) > 0:
 			stagger = np.asarray([ +V if (x % 2 == 0) else -V
 								for x in range(L_cells) ])
 			for alpha in range(len(self.lat.unit_cell)):      # usually alpha == 0
@@ -67,9 +92,9 @@ class RealSpaceHubbard1D(CouplingMPOModel, NearestNeighborModel):
 
 # chi is bond dimension of MPS (chi ~ log (S_ent))
 # Should check increasing chi to see convergence of E_gnd
-def get_gnd(L, chi, U=1, t=1, mu=0,V=0):
+def get_gnd(L, chi, U=1, t=1, mu=0, V=0, V_sep=None):
 	# initialize Hamiltonian
-	model = RealSpaceHubbard1D({'L': L, 'U':U, 't':t, 'bc':'open', 'bc_MPS':'finite', 'mu':mu,'V':V})
+	model = RealSpaceHubbard1D({'L': L, 'U':U, 't':t, 'bc':'open', 'bc_MPS':'finite', 'mu':mu, 'V':V, 'V_sep':V_sep})
 	
 	# Choose initial state based on chemical potential
 	if mu > U:
@@ -96,20 +121,33 @@ def get_gnd(L, chi, U=1, t=1, mu=0,V=0):
 
 # uses iDMRG to get gnd state energy density in thermodynamic limit (L -> \infty)
 # may not be best choice if system is gapless (test it a bit to check)
-def get_gnd_infinite(chi, U=1, t=1, mu=0,V=0):
+def get_gnd_infinite(chi, U=1, t=1, mu=0, V=0, V_sep=None):
 	# initialize Hamiltonian
-	model = RealSpaceHubbard1D({'L': 2, 'U':U, 't':t, 'bc':'periodic', 'bc_MPS':'infinite', 'mu':mu,'V':V})
+	
+	# Determine unit cell size based on V_sep
+	if V_sep is not None:
+		# V_sep is a tuple (p, q) - need q sites for the unit cell
+		# to capture the periodicity of the potential
+		L_V_sep = V_sep[1]
+	else:
+		# Default unit cell size for standard iDMRG
+		L_V_sep = 2
+	
+	model = RealSpaceHubbard1D({'L': L_V_sep, 'U':U, 't':t, 'bc':'periodic', 'bc_MPS':'infinite', 'mu':mu, 'V':V, 'V_sep':V_sep})
 	
 	# Choose initial state based on chemical potential
 	if mu > U:
 		# Start from fully filled state for positive mu
-		product_state = ['full', 'full']
+		product_state = L_V_sep * ['full']
 	elif mu < 0:
 		# Start from empty state for negative mu
-		product_state = ['empty', 'empty']
+		product_state = L_V_sep * ['empty']
 	else:
 		# Start from Néel state at mu=0
-		product_state = ['up', 'down']
+		product_state = (L_V_sep // 2) * ['up', 'down']
+		# Handle odd L_V_sep
+		if L_V_sep % 2 == 1:
+			product_state.append('up')
 	
 	psi = tp.MPS.from_product_state(model.lat.mps_sites(), product_state, 'infinite')
 
@@ -121,14 +159,14 @@ def get_gnd_infinite(chi, U=1, t=1, mu=0,V=0):
 	engine = tp.TwoSiteDMRGEngine(psi, model, dmrg_params)
 	E, psi = engine.run()
 	
-	# For infinite system, measure on the unit cell (2 sites)
-	N_up = np.mean([psi.expectation_value('Nu', i) for i in range(2)])
-	N_down = np.mean([psi.expectation_value('Nd', i) for i in range(2)])
+	# For infinite system, measure on the unit cell
+	N_up = np.mean([psi.expectation_value('Nu', i) for i in range(L_V_sep)])
+	N_down = np.mean([psi.expectation_value('Nd', i) for i in range(L_V_sep)])
 	filling = N_up + N_down
 	
 	return E, psi, filling
 
-def run_dmrg_method(U, mu_0, V=0, t=1, system_size=10, chi=32):
+def run_dmrg_method(U, mu_0, V=0, V_sep=None, t=1, system_size=10, chi=32):
     """
     Run real-space DMRG calculation
     
@@ -143,7 +181,7 @@ def run_dmrg_method(U, mu_0, V=0, t=1, system_size=10, chi=32):
     Returns:
         (energy, filling): Total energy and filling
     """
-    energy, psi, filling = get_gnd_infinite(chi=chi, U=U, t=t, mu=mu_0, V=V)
+    energy, psi, filling = get_gnd_infinite(chi=chi, U=U, t=t, mu=mu_0, V=V, V_sep=V_sep)
     
     return energy, filling, psi
 		
