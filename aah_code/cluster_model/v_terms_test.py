@@ -7,9 +7,9 @@ import numpy as np
 import quspin
 from quspin.operators import hamiltonian
 from quspin.basis import spinful_fermion_basis_1d
-from typing import Tuple, Dict, List, Optional
+from typing import Any, Union,Tuple, Dict, List, Optional
 from collections import defaultdict,deque
-from typing import Any
+
 from aah_code.cluster_model.clustering import step_from_ratio
 from aah_code.cluster_model.clustering import generate_clusters, convert_site_clusters_to_k
 from fractions import Fraction
@@ -318,6 +318,10 @@ def test_v_terms(L=4, V_0=1, int_cluster_size=2,
 
 
 
+
+
+
+
 ##########t_tilde implementations
 def cosine_dispersion(t,k):
     return 2*t*np.cos(k)
@@ -342,6 +346,10 @@ def compute_t_tilde_terms(k_sites_supercluster:np.ndarray,
     """
 
 
+
+
+
+
 if __name__ == "__main__":
     print(f'testing just the t terms.')
     
@@ -357,6 +365,8 @@ if __name__ == "__main__":
     print(f'supercluster shape: {supercluster.shape}')
     print(f'supercluster: {supercluster}')
     print(f'supercluster k: {supercluster_k/np.pi}')
+
+    #t_terms=alpha_terms_by_separation(supercluster,supercluster_k,t=1,spin="spinless")
     
     
     # v_terms=v_couplings_basis(V_separation=V_separation_ratio,

@@ -226,6 +226,7 @@ def compare_int_seps_with_dmrg(
                     
                     system_expectations, _ = get_general_expectations(run_config)
                     energy, filling, _ = system_expectations
+                    print(f"Raw Energy: {energy}, raw Filling: {filling}")
                     energy_subtracted = (energy + mu_0 * filling) / L
                     filling_per_site = filling / L
                     

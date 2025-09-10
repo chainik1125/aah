@@ -65,6 +65,7 @@ def make_cluster_ham(supercluster_ks,
     
     static.extend(v_terms_static)
 
+    
     t_tilde_terms=alpha_terms_by_separation(supercluster_idxs,supercluster_ks,t,spin='spinful')
     
 
@@ -96,10 +97,10 @@ def make_cluster_ham(supercluster_ks,
 
 
 if __name__ == "__main__":
-    L=4
-    Nc=2
-    t=0.0
-    V=2.0
+    L=6
+    Nc=3
+    t=1.0
+    V=0.0
     U=0.0
     mu_0=0.0
     
