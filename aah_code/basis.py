@@ -77,7 +77,7 @@ if __name__ == "__main__":
 
     print(f'local_lattice self.pairs keys:{local_lattice.pairs.keys()}')
 
-    print(f' can I get all pairs? {local_lattice.pairs['nearest_neighbors']}')
+    print(f" can I get all pairs? {local_lattice.pairs['nearest_neighbors']}")
     exit()
     
 

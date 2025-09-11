@@ -15,6 +15,9 @@ from tenpy.models import CouplingMPOModel,NearestNeighborModel,lattice
 import tenpy as tp
 from tenpy.algorithms import exact_diag
 import numpy as np
+import sys
+import io
+from contextlib import redirect_stdout
 import matplotlib.pyplot as plt
 from typing import Union
 import plotly.graph_objects as go
@@ -392,12 +395,18 @@ class SpectrumSolver():
 			ham,basis=self.hamiltonian
 			ed_ham=ham.toarray()
 
+			# Import logging only when needed
+			try:
+				from aah_code.cluster_model.logging_config import info
+			except ImportError:
+				info = lambda x: None  # No-op if logging not available
+			
 			if self.solver_method=='dense_ED':
 				eigvals,eigvecs=np.linalg.eigh(ed_ham)
-				print(f"Dense ED: computed {len(eigvals)} eigenvalues")
+				info(f"Dense ED: computed {len(eigvals)} eigenvalues")
 			elif self.solver_method=='sparse_ED':
 				eigvals,eigvecs=sparse_diagonalize(ham,k=self.states_retained,return_eigenvectors=True)
-				print(f"Sparse ED: computed {len(eigvals)} eigenvalues")
+				info(f"Sparse ED: computed {len(eigvals)} eigenvalues")
 			else:
 				raise ValueError(f'Solver method {self.solver_method} not implemented yet')
 			  # After getting eigenvalues and eigenvectors
@@ -417,8 +426,10 @@ class SpectrumSolver():
 				static_up = [["n|", n_up_list]]    # spin-up number operator  
 				static_down = [["|n", n_down_list]]  # spin-down number operator
 				
-				n_up_op = hamiltonian(static_up, [], basis=basis, dtype=np.complex128)
-				n_down_op = hamiltonian(static_down, [], basis=basis, dtype=np.complex128)
+				# Suppress quspin's successful check messages but keep error checking
+				with redirect_stdout(io.StringIO()):
+					n_up_op = hamiltonian(static_up, [], basis=basis, dtype=np.complex128)
+					n_down_op = hamiltonian(static_down, [], basis=basis, dtype=np.complex128)
 				
 				n_up_site_ops.append(n_up_op)
 				n_down_site_ops.append(n_down_op)
@@ -2255,7 +2266,7 @@ def expectations_plot_combined(physical_params: HamiltonianParams):
 		dmrg_totals[component] = np.sum(dmrg_dict[component])
 		mismatched_totals[component] = np.sum(mismatched_cluster_dict[component])
 	
-	print(f'mismatched components: {np.array(mismatched_totals.values()).sum()},total energy: {mismatched_totals['total_energy'].sum()}')
+	print(f"mismatched components: {np.array(list(mismatched_totals.values())).sum()},total energy: {mismatched_totals['total_energy'].sum()}")
 	exit()
 
 	methods = ['DMRG', 'Mismatched Cluster']

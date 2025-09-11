@@ -5,6 +5,9 @@ For now, we'll create a minimal working example.
 
 import numpy as np
 import matplotlib.pyplot as plt
+import sys
+import io
+from contextlib import redirect_stdout
 from aah_code.cluster_model.clustering import generate_clusters, convert_site_clusters_to_k
 from aah_code.cluster_model.t_tilde import alpha_terms_by_separation
 from quspin.operators import hamiltonian
@@ -48,7 +51,9 @@ def make_simple_cluster_ham(
     if V != 0:
         print(f"Warning: V terms skipped in this simple version")
     
-    H = hamiltonian(static, [], basis=basis, dtype=np.complex64)
+    # Suppress quspin's successful check messages but keep error checking
+    with redirect_stdout(io.StringIO()):
+        H = hamiltonian(static, [], basis=basis, dtype=np.complex64)
     return H, basis
 
 

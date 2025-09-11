@@ -2,7 +2,39 @@
 This file will calculate the real space DMRG to compare with the other values
 """
 
+import os
 import logging
+
+# Optimize threading for DMRG calculations
+# This must be done BEFORE importing numpy/scipy/tenpy
+if 'OMP_NUM_THREADS' not in os.environ:
+    try:
+        # Try to use the RunPod CPU optimization if available
+        from aah_code.cluster_model.runpod_runs import optimize_cpus
+        optimize_cpus(verbose=False)
+    except ImportError:
+        # Fallback: Set threading manually
+        try:
+            import multiprocessing
+            n_cpus = multiprocessing.cpu_count()
+            # Use physical cores (typically half of vCPUs for hyperthreading)
+            n_threads = max(1, min(48, n_cpus // 2))  # Cap at 48 like our other optimization
+            
+            # Set all threading environment variables
+            thread_vars = [
+                'OMP_NUM_THREADS',
+                'OPENBLAS_NUM_THREADS',
+                'MKL_NUM_THREADS',
+                'VECLIB_MAXIMUM_THREADS',
+                'NUMEXPR_NUM_THREADS'
+            ]
+            
+            for var in thread_vars:
+                os.environ[var] = str(n_threads)
+            
+            print(f"DMRG: Set threading to {n_threads} threads")
+        except:
+            pass  # Fail silently if we can't optimize
 from aah_code.clusters import ClusterExperiment
 from aah_code.basis import LocalClusterBasis
 from aah_code.global_params import StatesParams,HamiltonianParams

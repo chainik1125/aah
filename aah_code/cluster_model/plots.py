@@ -10,6 +10,12 @@ from typing import Tuple, List
 import os
 import pickle
 from datetime import datetime
+try:
+    from aah_code.cluster_model.logging_config import debug, info
+except ImportError:
+    # Fallback if logging not available
+    def debug(msg): pass
+    def info(msg): pass
 
 from aah_code.cluster_model.model import ClusterModelConfig, PhysicalParams
 from aah_code.cluster_model.run_scripts_me import get_general_expectations
@@ -125,7 +131,7 @@ def compare_int_seps_with_dmrg(
     all_results = {}
     failed_calculations = []
     
-    for vary_val in tqdm(varying_values, desc=f"{varying_param_name} values", position=0, leave=True, ncols=80):
+    for vary_val in tqdm(varying_values, desc=f"{varying_param_name} values", position=0, leave=True, ncols=100):
         all_results[vary_val] = {
             'energies_idmrg': [],
             'fillings_idmrg': [],
@@ -145,7 +151,7 @@ def compare_int_seps_with_dmrg(
             all_results[vary_val][f'energies_{int_sep_key}'] = []
             all_results[vary_val][f'fillings_{int_sep_key}'] = []
         
-        for x_val in tqdm(x_values, desc=f"  {x_param_name} ({varying_param_name}={vary_val:.2f})", position=1, leave=False, ncols=80):
+        for x_val in tqdm(x_values, desc=f"  {x_param_name} ({varying_param_name}={vary_val:.2f})", position=1, leave=True, ncols=100):
             # Build parameter dict for current iteration
             params = {
                 x_param_name: x_val,
@@ -226,7 +232,7 @@ def compare_int_seps_with_dmrg(
                     
                     system_expectations, _ = get_general_expectations(run_config)
                     energy, filling, _ = system_expectations
-                    print(f"Raw Energy: {energy}, raw Filling: {filling}")
+                    debug(f"Raw Energy: {energy}, raw Filling: {filling}")
                     energy_subtracted = (energy + mu_0 * filling) / L
                     filling_per_site = filling / L
                     

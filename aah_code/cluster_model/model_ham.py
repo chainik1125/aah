@@ -4,7 +4,11 @@ Script for making the hamiltonian.
 
 from typing import Tuple, List, Dict, Optional, Union
 import numpy as np
+import sys
+import io
+from contextlib import redirect_stdout
 from aah_code.cluster_model import v_terms_test
+from aah_code.cluster_model.logging_config import debug, info
 import quspin
 from quspin.operators import hamiltonian
 from quspin.basis import spinful_fermion_basis_1d
@@ -35,9 +39,10 @@ def make_cluster_ham(supercluster_ks,
     super_cluster_size=int(np.prod(supercluster_ks.shape))
 
 
-    print(f"Creating basis for super_cluster_size: {super_cluster_size}")
-    print(f"Supercluster k shape: {supercluster_ks.shape}")
-    print(f"Supercluster indices shape: {supercluster_idxs.shape}")
+    # Log verbose information (only shown when CLUSTER_VERBOSE=true)
+    info(f"Creating basis for super_cluster_size: {super_cluster_size}")
+    debug(f"Supercluster k shape: {supercluster_ks.shape}")
+    debug(f"Supercluster indices shape: {supercluster_idxs.shape}")
     
     basis=spinful_fermion_basis_1d(super_cluster_size)
 
@@ -89,7 +94,9 @@ def make_cluster_ham(supercluster_ks,
     static.append(["n|", mu_0_list])
     static.append(["|n", mu_0_list])
 
-    H = hamiltonian(static, [], basis=basis, dtype=np.complex64)
+    # Suppress quspin's successful check messages but keep error checking
+    with redirect_stdout(io.StringIO()):
+        H = hamiltonian(static, [], basis=basis, dtype=np.complex64)
 
     return H,basis
 

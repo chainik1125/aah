@@ -1,5 +1,5 @@
 import numpy as np
-
+from aah_code.cluster_model.logging_config import debug, info
 
 from aah_code.cluster_model.clustering import generate_clusters,convert_site_clusters_to_k
 from aah_code.cluster_model.model_ham import make_cluster_ham
@@ -37,10 +37,10 @@ def get_general_spectra(run_config:ClusterModelConfig,return_ham:bool=False):
 	for sc_idx,cluster_k in enumerate(all_superclusters_k_unsqueezed):
 		cluster_k_no_last_dim=cluster_k[...,0]
 		cluster_indices=all_superclusters[sc_idx]
-		print(f'cluster_k_no_last_dim shape: {cluster_k_no_last_dim.shape}')
-
-		print(f'cluster_k: {cluster_k/np.pi}')
-		print(f'cluster_indices: {cluster_indices}')
+		# Log verbose information (only shown when CLUSTER_VERBOSE=true)
+		debug(f'cluster_k_no_last_dim shape: {cluster_k_no_last_dim.shape}')
+		debug(f'cluster_k: {cluster_k/np.pi}')
+		debug(f'cluster_indices: {cluster_indices}')
 		sc_cluster_ham,sc_cluster_basis=make_cluster_ham(cluster_k_no_last_dim,cluster_indices,t,V,U,mu_0,L,Nc,int_sep_ratio,v_sep_ratio,ham_lib='quspin')
 
 		input=(sc_cluster_ham,sc_cluster_basis)	
@@ -72,7 +72,7 @@ def get_general_expectations(run_config:ClusterModelConfig):
 	
 	#state_params=StatesParams(spin_states=2)
 	physical_params=run_config.physical_params
-	print(f'k points shape: {spectra_4tuple[0].shape},\n energies shape: {spectra_4tuple[1].shape},\n number_spectrum shape: {spectra_4tuple[2].shape}, spin spectrum shape: {spectra_4tuple[3].shape}')
+	info(f'k points shape: {spectra_4tuple[0].shape}, energies shape: {spectra_4tuple[1].shape}, number_spectrum shape: {spectra_4tuple[2].shape}, spin spectrum shape: {spectra_4tuple[3].shape}')
 
 	full_spectrum_obj=FullSpectrum(None,None,physical_params,None)
 	system_expectations,cluster_expectations=full_spectrum_obj.get_cluster_thermodynamic_expectations(spectra_4tuple,None)
@@ -97,7 +97,7 @@ def test_quick_mismatched(lattice_points,cluster_size,physical_params,ham_lib:st
 	#k_points,energies,number_spectrum,spin_spectrum=get_spectra(cluster_ks)
 	spectra_4tuple=get_spectra(cluster_ks, state_params, physical_params,ham_lib=ham_lib)
 	
-	print(f'k points shape: {spectra_4tuple[0].shape},\n energies shape: {spectra_4tuple[1].shape},\n number_spectrum shape: {spectra_4tuple[2].shape}, spin spectrum shape: {spectra_4tuple[3].shape}')
+	info(f'k points shape: {spectra_4tuple[0].shape}, energies shape: {spectra_4tuple[1].shape}, number_spectrum shape: {spectra_4tuple[2].shape}, spin spectrum shape: {spectra_4tuple[3].shape}')
 
 	full_spectrum_obj=FullSpectrum(None,state_params,physical_params,None)
 	system_expectations,cluster_expectations=full_spectrum_obj.get_cluster_thermodynamic_expectations(spectra_4tuple,None)

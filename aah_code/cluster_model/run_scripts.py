@@ -4,6 +4,9 @@ Run scripts for the general cluster method with arbitrary tilings.
 
 import numpy as np
 import matplotlib.pyplot as plt
+import sys
+import io
+from contextlib import redirect_stdout
 from typing import Tuple, List, Dict, Optional
 from aah_code.cluster_model.clustering import generate_clusters, convert_site_clusters_to_k
 from aah_code.cluster_model.model_ham import make_cluster_ham
@@ -112,7 +115,9 @@ def run_general_cluster_method(
         n_list_up = [[1.0, i] for i in range(super_cluster_size)]
         n_list_down = [[1.0, i] for i in range(super_cluster_size)]
         static_n = [["n|", n_list_up], ["|n", n_list_down]]
-        N_op = hamiltonian(static_n, [], basis=basis, dtype=np.float64)
+        # Suppress quspin's successful check messages but keep error checking
+        with redirect_stdout(io.StringIO()):
+            N_op = hamiltonian(static_n, [], basis=basis, dtype=np.float64)
         
         # Calculate expectations
         n_expect = np.real(np.conj(gs_state) @ N_op.toarray() @ gs_state)
