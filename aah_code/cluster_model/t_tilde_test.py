@@ -139,7 +139,7 @@ def dft_U_block(Nc: int,
 		k0 = 2*np.pi*np.arange(Nc)/Nc
 	if R0 is None:
 		R0 = np.arange(Nc, dtype=float)
-	return np.exp(1j*np.outer(np.asarray(k0,float), np.asarray(R0,float))) / np.sqrt(Nc)
+	return np.exp(-1j*np.outer(np.asarray(k0,float), np.asarray(R0,float))) / np.sqrt(Nc)
 
 def alpha_dispersion_block(k_phys: np.ndarray,
 						   t: float,

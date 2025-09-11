@@ -4,13 +4,15 @@ Script for making the hamiltonian.
 
 from typing import Tuple, List, Dict, Optional, Union
 import numpy as np
+from aah_code.cluster_model import v_terms_test
 import quspin
 from quspin.operators import hamiltonian
 from quspin.basis import spinful_fermion_basis_1d
 from aah_code.cluster_model.clustering import generate_clusters, convert_site_clusters_to_k
 #from aah_code.cluster_model.t_tilde import alpha_terms_by_separation
 from aah_code.cluster_model.v_terms import compute_V_couplings_bruteforce
-from aah_code.hamiltonian import benchmark_sparse_vs_dense,sparse_diagonalize
+from aah_code.hamiltonian import benchmark_sparse_vs_dense
+from aah_code.hamiltonian import sparse_diagonalize
 from aah_code.cluster_model.v_terms_test import compute_V_via_matrix_pipeline
 from aah_code.cluster_model.t_tilde_test import alpha_terms_by_separation
 
@@ -94,9 +96,70 @@ def make_cluster_ham(supercluster_ks,
 
 
 
+#Need to recrete the current t\=0, V\=0 error...
+#Ah you should write a func to make the k-space non-interacting hamiltonian...
+
+def minimal_t_V_n3_failure():
+    L=6
+    Nc=3
+    t=1.0
+    V=1.0
+    U=0
+    mu_0=0
+
+    v_sep=(1,6)
+    int_sep_matched=(1,6) #int_sep=(1,6) neither works
+    int_sep_unmatched=(1,3)
+
+    supercluster_idxs_matched=generate_clusters(L,Nc,int_sep_matched,v_sep)[0]
+    supercluster_k_matched=convert_site_clusters_to_k(supercluster_idxs_matched,L)
+
+    supercluster_idxs_unmatched=generate_clusters(L,Nc,int_sep_unmatched,v_sep)[0]
+    supercluster_k_unmatched=convert_site_clusters_to_k(supercluster_idxs_unmatched,L)
+
+    print(f"Supercluster idxs matched shape: {supercluster_idxs_matched.shape}")
+    print(f"Supercluster idxs matched: {supercluster_idxs_matched}")
+    print(f"Supercluster k matched shape: {supercluster_k_matched.shape}")
+    print(f"Supercluster k matched: {supercluster_k_matched/np.pi}")
+
+    print(f"Supercluster idxs unmatched shape: {supercluster_idxs_unmatched.shape}")
+    print(f"Supercluster idxs unmatched: {supercluster_idxs_unmatched}")
+    print(f"Supercluster k unmatched shape: {supercluster_k_unmatched.shape}")
+    print(f"Supercluster k unmatched: {supercluster_k_unmatched/np.pi}")
+
+    H_matched, basis=make_cluster_ham(supercluster_k_matched,supercluster_idxs_matched,t,V,U,mu_0,L,Nc,int_sep_matched,v_sep)
+    H_unmatched, basis=make_cluster_ham(supercluster_k_unmatched,supercluster_idxs_unmatched,t,V,U,mu_0,L,Nc,int_sep_unmatched,v_sep)
+
+    print(f"H_matched shape: {H_matched.toarray().shape}")
+    print(f"H_unmatched shape: {H_unmatched.toarray().shape}")
+
+    H_matched_eigvals, H_matched_evecs=sparse_diagonalize(H_matched.toarray(),k=6)
+    H_unmatched_eigvals, H_unmatched_evecs=sparse_diagonalize(H_unmatched.toarray(),k=6)
+
+    print(f"H_matched eigvals: {H_matched_eigvals}")
+    print(f"H_unmatched eigvals: {H_unmatched_eigvals}")
+
+    # t_terms_static=alpha_terms_by_separation(supercluster_idxs_matched,supercluster_k_matched,t,spin='spinless')
+    
+    # v_terms=compute_V_via_matrix_pipeline(
+    #     V_separation=v_sep,
+    #     k_sites_supercluster=supercluster_idxs,
+    #     L=L,
+    #     V0=V,
+    #     spinless=True
+    # )
+
+    # v_terms_static=v_terms["to_quspin_spinless"]
+
+
+    return None
 
 
 if __name__ == "__main__":
+
+    minimal_t_V_n3_failure()
+    exit()
+
     L=6
     Nc=3
     t=1.0
@@ -104,8 +167,8 @@ if __name__ == "__main__":
     U=0.0
     mu_0=0.0
     
-    int_sep_ratio=(1,2)
-    v_sep_ratio=(1,4)
+    int_sep_ratio=(1,3)
+    v_sep_ratio=(1,6)
 
     supercluster_idxs=generate_clusters(L,Nc,int_sep_ratio,v_sep_ratio)[0]
     supercluster_k=convert_site_clusters_to_k(supercluster_idxs,L)

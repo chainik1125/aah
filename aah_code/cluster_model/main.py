@@ -315,7 +315,7 @@ def old_new_quspin_comparison():
 
 
 if __name__ == "__main__":
-    L=84
+    L=60
     Nc=3
     #t=0.0
     states_retained=6
