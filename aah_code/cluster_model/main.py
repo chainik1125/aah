@@ -315,14 +315,15 @@ def old_new_quspin_comparison():
 
 
 if __name__ == "__main__":
-    L=60
-    Nc=3
+    L=24
+    Nc=2
     #t=0.0
+    fixed_t=1.0
     states_retained=6
     U_values=np.linspace(0,3,3)
     V_values=[1e-6,1,2]
     t_values=[0,1/2,1]
-    v_sep_ratio=(1,6)
+    v_sep_ratio=(1,4)
     solver_method='sparse_ED'
 
     
@@ -339,19 +340,19 @@ if __name__ == "__main__":
     
     # Compare different int_sep configurations with DMRG for fixed v_sep
 
-    int_sep_list=[(1,3),(1,6)]
+    int_sep_list=[(1,2),(1,4)]
 
     compare_int_seps_with_dmrg(
         v_sep_ratio=v_sep_ratio,
         int_sep_list=int_sep_list,
-        x_axis={'t':t_values},
+        x_axis={'U':U_values},
         varying_parameter={'V':V_values},
-        fixed_parameter={'U':0.0},
+        fixed_parameter={'t':fixed_t},
         L=L,
         Nc=Nc,
         solver_method=solver_method,
         states_retained=states_retained,
-        include_idmrg=True,          # Include infinite DMRG (default)
+        include_idmrg=False,          # Include infinite DMRG (default)
         include_finite_dmrg=True    # Optionally include finite DMRG
     )
 

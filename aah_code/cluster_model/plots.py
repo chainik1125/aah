@@ -189,11 +189,11 @@ def compare_int_seps_with_dmrg(
                     # Finite DMRG calculation (with actual system size L)
                     energy_finite, _, filling_finite = get_gnd(L, chi, U, t, mu_0, V, v_sep_ratio)
                     energy_finite_per_site = energy_finite / L
-                    filling_finite_per_site = filling_finite / L
-                    energy_finite_subtracted = energy_finite_per_site + mu_0 * filling_finite_per_site
+                    # filling_finite is already per-site from get_gnd
+                    energy_finite_subtracted = energy_finite_per_site + mu_0 * filling_finite
                     
                     all_results[vary_val]['energies_finite_dmrg'].append(energy_finite_subtracted)
-                    all_results[vary_val]['fillings_finite_dmrg'].append(filling_finite_per_site)
+                    all_results[vary_val]['fillings_finite_dmrg'].append(filling_finite)
                 except Exception as e:
                     # If finite DMRG fails, append NaN and record the failure
                     all_results[vary_val]['energies_finite_dmrg'].append(np.nan)
