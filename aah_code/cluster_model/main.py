@@ -4,24 +4,32 @@ Eventually this will just be simple call to the ClusterModel class
 but for now I just want to get a single spectrum run going.
 """
 
+import os
+from typing import Tuple
+
 import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from typing import Tuple
+
 try:
     from tqdm import tqdm
 except ImportError:
     # Fallback if tqdm is not installed
     def tqdm(iterable, desc=None):
         return iterable
-import os
 
-from compare_old_new_line_plots import save_line_plots, compare_old_new_line_plots, get_old_method_results
+from aah_code.cluster_model.compare_old_new_line_plots import (
+    compare_old_new_line_plots,
+    get_old_method_results,
+    save_line_plots,
+)
+from aah_code.cluster_model.convergence_workflow import (
+    SweepGrid,
+    run_convergence_study,
+)
 from aah_code.cluster_model.model import ClusterModelConfig, PhysicalParams
 from aah_code.cluster_model.run_scripts_me import get_general_expectations
 from aah_code.real_space_dmrg import run_dmrg_method
-from aah_code.cluster_model.plots import compare_int_seps_with_dmrg
-from aah_code.cluster_model.clustering import enumerate_m,generate_clusters
 
 def three_way_comparison_with_dmrg(
     int_sep_ratio: Tuple[int, int],
@@ -315,61 +323,110 @@ def old_new_quspin_comparison():
     return figures
 
 
-if __name__ == "__main__":
-    L=24
-    Nc=4
-    #t=0.0
-    fixed_t=1.0
-    states_retained=6
-    U_values=np.unique(np.concatenate([np.linspace(0, 1, 3), np.linspace(2, 8, 3)]))
-    V_values=[1e-6,1,2]
-    t_values=[0,1/2,1]
-    v_sep_ratio=(5,8)
-    solver_method='sparse_ED'
+def run_convergence_example(U_values,V_values):
+    """
+    Example entry point demonstrating the convergence workflow.
+    """
+    golden_ratio = 2.0 / (np.sqrt(5.0) - 1.0)
+    # The AA modulation only depends on beta modulo 1, so we drop the integer part
+    # to obtain the usual sequence of Hurwitz approximants (1, 1/2, 2/3, 3/5, ...).
+    beta = golden_ratio % 1.0
+    max_supercluster_size = 8
 
+    #U_values = np.unique(
+    #    np.concatenate([np.linspace(0, 1, 3)])
+    #)
     
-    #old_new_quspin_comparison()
-    # three_way_comparison_with_dmrg(
-    #     L=L,
-    #     Nc=Nc,
-    #     int_sep_ratio=int_sep_ratio,
-    #     v_sep_ratio=v_sep_ratio,
-    #     U_values=U_values,
-    #     V_values=V_values,
-    #     solver_method=solver_method
-    # )
-    
-    # Compare different int_sep configurations with DMRG for fixed v_sep
+    #V_values = [1e-6, 1.0, 2.0]
 
-    int_sep_list=[(1,2)]
-
-    allowed_m=enumerate_m(L,Nc,[int(L*v_sep_ratio[0]/v_sep_ratio[1])],8)
-    print(f'allowed_m: {allowed_m}')
-    for m in allowed_m:
-        clusters=generate_clusters(L,Nc,(m,L),v_sep_ratio)
-        print(f"PARAMETERS: L={L},m={m},V step n={int(L*v_sep_ratio[0]/v_sep_ratio[1])}, cluster_shapes={clusters.shape}")
-    
-    int_seps=[(m,L) for m in allowed_m]
-
-    compare_int_seps_with_dmrg(
-        v_sep_ratio=v_sep_ratio,
-        int_sep_list=int_seps,
-        x_axis={'U':U_values},
-        varying_parameter={'V':V_values},
-        fixed_parameter={'t':fixed_t},
-        L=L,
-        Nc=Nc,
-        solver_method=solver_method,
-        states_retained=states_retained,
-        include_idmrg=False,          # Include infinite DMRG (default)
-        include_finite_dmrg=True    # Optionally include finite DMRG
+    sweep = SweepGrid(
+        x_axis={"U": U_values},
+        varying_parameter={"V": V_values},
+        fixed_parameter={"t": 1.0},
+        solver_method="sparse_ED",
+        chi=32,
+        states_retained=6,
+        include_idmrg=False,
+        include_finite_dmrg=True,
     )
 
+    manifest = run_convergence_study(
+        beta,
+        max_supercluster_size=max_supercluster_size,
+        cluster_sizes=[2, 3, 4,8],
+        sweep=sweep,
+        base_L=48,
+        max_beta_denominator=max_supercluster_size,
+        output_root="large_files/runs/convergence_study",
+    )
+
+    print("Convergence study complete.")
+    print(f"Golden ratio beta_raw={golden_ratio:.12f}, beta_used={beta:.12f}")
+    print(f"Artifacts stored under: {manifest['output_root']}")
+    print("Manifest entries:")
+    for entry in manifest["entries"]:
+        beta_ratio = entry["beta_ratio"]
+        status = entry.get("status", "completed")
+        if status == "completed":
+            artifacts = entry.get("artifacts", {})
+            print(
+                f"  Nc={entry['Nc']} | beta={beta_ratio[0]}/{beta_ratio[1]} "
+                f"| artifacts -> {artifacts.get('task_dir', 'n/a')}"
+            )
+        else:
+            reason = entry.get("reason", "unspecified")
+            print(
+                f"  Nc={entry['Nc']} | beta={beta_ratio[0]}/{beta_ratio[1]} "
+                f"| status={status.upper()} | reason: {reason}"
+            )
 
 
+if __name__ == "__main__":
+    
+    U_values=[0,1e-1,5e-1,1,2,8,50]
+    V_values=[1e-6,5e-1,1,2,10]
+    run_convergence_example(U_values,V_values)
+
+
+
+    # Legacy manual workflow reference:
+    # L = 24
+    # Nc = 4
+    # fixed_t = 1.0
+    # states_retained = 6
+    # U_values = np.unique(np.concatenate([np.linspace(0, 1, 3), np.linspace(2, 8, 3)]))
+    # V_values = [1e-6, 1.0, 2.0]
+    # t_values = [0, 0.5, 1.0]
+    # v_sep_ratio = (5, 8)
+    # solver_method = "sparse_ED"
+    #
+    # int_sep_list = [(1, 2)]
+    #
+    # allowed_m = enumerate_m(L, Nc, [int(L * v_sep_ratio[0] / v_sep_ratio[1])], 8)
+    # print(f"allowed_m: {allowed_m}")
+    # for m in allowed_m:
+    #     clusters = generate_clusters(L, Nc, (m, L), v_sep_ratio)
+    #     print(
+    #         f\"PARAMETERS: L={L}, m={m}, "
+    #         f\"V step n={int(L * v_sep_ratio[0] / v_sep_ratio[1])}, "
+    #         f\"cluster_shapes={clusters.shape}\"
+    #     )
+    #
+    # int_seps = [(m, L) for m in allowed_m]
+    #
     # compare_int_seps_with_dmrg(
     #     v_sep_ratio=v_sep_ratio,
-    #     int_sep_list=int_sep_list
+    #     int_sep_list=int_seps,
+    #     x_axis={"U": U_values},
+    #     varying_parameter={"V": V_values},
+    #     fixed_parameter={"t": fixed_t},
+    #     L=L,
+    #     Nc=Nc,
+    #     solver_method=solver_method,
+    #     states_retained=states_retained,
+    #     include_idmrg=False,
+    #     include_finite_dmrg=True,
+    # )
     #     U_values=U_values,
     #     V_values=V_values,
     #     L=L,
