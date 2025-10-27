@@ -224,6 +224,159 @@ def convert_site_clusters_to_k(site_clusters:np.ndarray,L:int)->np.ndarray:
 
 
 
+#Code to enumerate possible interaction clustering spacings given L, N_c, a maximum supercluster size C_M
+
+
+
+from typing import List, Tuple, Dict, Optional
+
+# ---------- basic number theory helpers ----------
+
+def egcd(a: int, b: int):
+    if b == 0:
+        return (1, 0, a)
+    x1, y1, g = egcd(b, a % b)
+    return (y1, x1 - (a // b) * y1, g)
+
+def modinv(a: int, mod: int) -> int:
+    a %= mod
+    if mod == 1:
+        return 0
+    try:
+        return pow(a, -1, mod)  # Python 3.8+
+    except ValueError as e:
+        raise ValueError(f"No modular inverse for a={a} (mod {mod})") from e
+
+
+
+def lcgcd(vals: List[int]) -> int:
+    return reduce(gcd, vals)
+
+# ---------- algebraic tests matching your fusion logic ----------
+
+def tiling_invariants(L: int, Nc: int, m: int):
+    """
+    Return (ok, g1, qm, B) where:
+      g1 = gcd(L, m)
+      qm = L // g1
+      B = (qm // Nc)  blocks-per-orbit
+    ok is True iff Nc | qm.
+    """
+    g1 = gcd(L, m)
+    qm = L // g1
+    if qm % Nc != 0:
+        return False, g1, qm, 0
+    B = qm // Nc
+    return True, g1, qm, B
+
+def fused_supercluster_size(L: int, Nc: int, m: int, ns: List[int]) -> Optional[int]:
+    """
+    Returns number of SITES per fused supercluster under extra hops ns.
+    None => tiling invalid for this m.
+    Algebra only; no explicit cluster construction.
+    """
+    ok, g1, qm, B = tiling_invariants(L, Nc, m)
+    if not ok:
+        return None
+
+    if not ns:
+        # No fusion edges: each block stands alone
+        return Nc
+
+    # Case A: orbit-changing present (some n not multiple of g1)
+    if any((n % g1) != 0 for n in ns):
+        G = lcgcd([g1] + ns)  # = gcd(g1, n1, n2, ...)
+        return L // G  # = L / gcd(L, m, n1, n2, ...)
+
+    # All n preserve +m orbits: work mod qm
+    if qm == 1:
+        # degenerate: L == g1, single-site orbit replicated g1 times
+        return L // g1
+
+    mprime = m // g1
+    inv_m = modinv(mprime % qm, qm)
+    # r_i = ((n_i/g1) * m'^{-1}) mod qm
+    r_list = [((n // g1) * inv_m) % qm for n in ns]
+    s_list = [r % Nc for r in r_list]
+
+    # Case B: intra-block mixing present (any s != 0) -> whole orbit fuses
+    if any(s != 0 for s in s_list):
+        return L // g1
+
+    # Case C: pure block shifts -> split by block-stride gcd
+    q_shifts = [ (r // Nc) % B for r in r_list ]
+    d = lcgcd([B] + q_shifts)
+    return (L // g1) // d  # = (sites per orbit) / number of block-cycles
+
+def enumerate_m(
+    L: int,
+    Nc: int,
+    ns: List[int],
+    C_M: int,
+    *,
+    dedup_mirror: bool = True,
+    return_details: bool = False,
+) -> List[int] | List[Dict]:
+    """
+    Iterate m = 1..L-1, keep those that:
+      (i) admit an Nc-tiling, and
+      (ii) fuse into superclusters of size <= C_M under hops ns.
+
+    ns: extra hops given as integer steps modulo L.
+    dedup_mirror: if True, treat m and -m as equivalent and keep only one.
+
+    If return_details=True, returns a list of dicts with (m, g1, qm, B, size, regime).
+    """
+    seen_pairs = set()
+    out = []
+    for m in range(1, L):
+        if dedup_mirror:
+            key = tuple(sorted((m % L, (-m) % L)))
+            if key in seen_pairs:
+                continue
+            seen_pairs.add(key)
+
+        ok, g1, qm, B = tiling_invariants(L, Nc, m)
+        if not ok:
+            continue
+
+        size = fused_supercluster_size(L, Nc, m, ns)
+        if size is None or size > C_M:
+            continue
+
+        if return_details:
+            # Determine regime label for transparency
+            if any((n % g1) != 0 for n in ns):
+                regime = "orbit-changing"
+            else:
+                if qm == 1:
+                    regime = "orbit-preserving (degenerate)"
+                else:
+                    mprime = m // g1
+                    inv_m = modinv(mprime % qm, qm)
+                    r_list = [((n // g1) * inv_m) % qm for n in ns]
+                    s_list = [r % Nc for r in r_list]
+                    if any(s != 0 for s in s_list):
+                        regime = "orbit-preserving (intra-block mixing)"
+                    else:
+                        regime = "orbit-preserving (pure block shifts)"
+            out.append(dict(m=m, g1=g1, qm=qm, B=B, supercluster_size=size, regime=regime))
+        else:
+            out.append(m)
+    return out
+
+# ---------- optional convenience: ratios -> steps ----------
+def step_from_ratio(L: int, frac: Tuple[int, int]) -> int:
+    """
+    Convert (p, q) to an integer step n ≡ (p/q)*L (mod L).
+    Requires q | L. Reduces p mod q first.
+    """
+    p, q = frac
+    if L % q != 0:
+        raise ValueError(f"Denominator q={q} must divide L={L} to use (p/q)*L mod L.")
+    return ( (p % q) * (L // q) ) % L
+
+
     
         
     
@@ -241,7 +394,7 @@ if __name__ == "__main__":
     L=8
     int_cluster_size=2
     cluster_separation_ratio=(1,4)
-    V_separation_ratio=(1,4)
+    V_separation_ratio=(1,2)
 
     cluster_validation(L,int_cluster_size,cluster_separation_ratio,V_separation_ratio)
     test_clusters=generate_clusters(L,int_cluster_size,cluster_separation_ratio,V_separation_ratio)
@@ -249,6 +402,15 @@ if __name__ == "__main__":
     print(f"Test clusters superclusters shape: {test_clusters.shape}")
     print(f"Test clusters superclusters: {test_clusters}")
 
-    print(f"clusters in k-space (pi multiples): {convert_site_clusters_to_k(test_clusters)/np.pi}")
+    print(f"clusters in k-space (pi multiples): {convert_site_clusters_to_k(test_clusters,L)/np.pi}")
+
+
+    #Enumerate the possible clusters
+    allowed_m = enumerate_m(L, int_cluster_size, [int(L*V_separation_ratio[0]/V_separation_ratio[1])], 8, dedup_mirror=True, return_details=False)
+    print(f'allowed_m: {allowed_m}')
+    for m in allowed_m:
+        clusters=generate_clusters(L,int_cluster_size,(1,(L//m)),V_separation_ratio)
+        print(f"PARAMETERS: L={L},m={m},V step n={int(L*V_separation_ratio[0]/V_separation_ratio[1])}, cluster_shapes={clusters.shape}")
+    
 
     

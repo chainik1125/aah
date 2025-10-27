@@ -21,6 +21,7 @@ from aah_code.cluster_model.model import ClusterModelConfig, PhysicalParams
 from aah_code.cluster_model.run_scripts_me import get_general_expectations
 from aah_code.real_space_dmrg import run_dmrg_method
 from aah_code.cluster_model.plots import compare_int_seps_with_dmrg
+from aah_code.cluster_model.clustering import enumerate_m,generate_clusters
 
 def three_way_comparison_with_dmrg(
     int_sep_ratio: Tuple[int, int],
@@ -316,14 +317,14 @@ def old_new_quspin_comparison():
 
 if __name__ == "__main__":
     L=24
-    Nc=2
+    Nc=4
     #t=0.0
     fixed_t=1.0
     states_retained=6
-    U_values=np.linspace(0,3,3)
+    U_values=np.unique(np.concatenate([np.linspace(0, 1, 3), np.linspace(2, 8, 3)]))
     V_values=[1e-6,1,2]
     t_values=[0,1/2,1]
-    v_sep_ratio=(1,4)
+    v_sep_ratio=(5,8)
     solver_method='sparse_ED'
 
     
@@ -340,11 +341,19 @@ if __name__ == "__main__":
     
     # Compare different int_sep configurations with DMRG for fixed v_sep
 
-    int_sep_list=[(1,2),(1,4)]
+    int_sep_list=[(1,2)]
+
+    allowed_m=enumerate_m(L,Nc,[int(L*v_sep_ratio[0]/v_sep_ratio[1])],8)
+    print(f'allowed_m: {allowed_m}')
+    for m in allowed_m:
+        clusters=generate_clusters(L,Nc,(m,L),v_sep_ratio)
+        print(f"PARAMETERS: L={L},m={m},V step n={int(L*v_sep_ratio[0]/v_sep_ratio[1])}, cluster_shapes={clusters.shape}")
+    
+    int_seps=[(m,L) for m in allowed_m]
 
     compare_int_seps_with_dmrg(
         v_sep_ratio=v_sep_ratio,
-        int_sep_list=int_sep_list,
+        int_sep_list=int_seps,
         x_axis={'U':U_values},
         varying_parameter={'V':V_values},
         fixed_parameter={'t':fixed_t},
