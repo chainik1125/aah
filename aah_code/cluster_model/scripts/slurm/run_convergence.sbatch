@@ -238,11 +238,19 @@ source "$VENV_DIR/bin/activate"
 "$VENV_DIR/bin/python" -m pip install --upgrade pip setuptools wheel
 
 pushd "$SLURM_SUBMIT_DIR/aah" >/dev/null
-if ! "$VENV_DIR/bin/python" -m pip install -e ".[dev]" >/dev/null 2>&1; then
-    echo "Warning: installing dev extras failed, falling back to base install."
-    "$VENV_DIR/bin/python" -m pip install -e .
-fi
+"$VENV_DIR/bin/python" -m pip install -e .
 popd >/dev/null
+
+if command -v nvidia-smi >/dev/null 2>&1; then
+    if nvidia-smi -L >/dev/null 2>&1; then
+        if ! "$VENV_DIR/bin/python" -c "import cupy" >/dev/null 2>&1; then
+            echo "GPU detected; installing CUDA extras"
+            "$VENV_DIR/bin/python" -m pip install -e .[cuda]
+        else
+            echo "CuPy already available in venv; skipping install."
+        fi
+    fi
+fi
 
 if [[ "$RUN_COMMAND" == "$DEFAULT_RUN_COMMAND" ]]; then
     RUN_COMMAND="$VENV_DIR/bin/python -m aah_code.cluster_model.main"

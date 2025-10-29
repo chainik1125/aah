@@ -331,7 +331,7 @@ def run_convergence_example(U_values,V_values):
     # The AA modulation only depends on beta modulo 1, so we drop the integer part
     # to obtain the usual sequence of Hurwitz approximants (1, 1/2, 2/3, 3/5, ...).
     beta = golden_ratio % 1.0
-    max_supercluster_size = 9
+    max_supercluster_size = 4
 
     #U_values = np.unique(
     #    np.concatenate([np.linspace(0, 1, 3)])
@@ -353,9 +353,9 @@ def run_convergence_example(U_values,V_values):
     manifest = run_convergence_study(
         beta,
         max_supercluster_size=max_supercluster_size,
-        cluster_sizes=[2,3,4,5,6,7,8,9],
+        cluster_sizes=[2,3,4],
         sweep=sweep,
-        base_L=72,
+        base_L=24,
         max_beta_denominator=max_supercluster_size,
         output_root="large_files/runs/convergence_study",
     )

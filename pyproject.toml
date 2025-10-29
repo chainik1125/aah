@@ -19,10 +19,12 @@ dependencies = [
     "quspin",
     "pandas",
     "scipy",
-    "cupy-cuda12x",
 ]
 
 [project.optional-dependencies]
+cuda = [
+    "cupy-cuda12x"
+]
 
 [build-system]
 requires = [
