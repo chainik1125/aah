@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH --job-name=aah_fac_convergence_9
+#SBATCH --job-name=gpu_9
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --mem=32G
 #SBATCH --ntasks=1
-#SBATCH --time=48:00:00
-#SBATCH --partition=IllinoisComputes
+#SBATCH --time=08:00:00
+#SBATCH --partition=eng-research-gpu
 #SBATCH --account=bbradlyn-ic
 #SBATCH --mail-user=dmanningcoe@gmail.com
 #SBATCH --mail-type=ALL
@@ -13,6 +13,13 @@
 #SBATCH --begin=now
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
+#SBATCH --gres=gpu:1
+
+
+
+
+# module load anaconda3/2024.10
+
 
 # Optional runtime configuration (modules, conda env, command) loaded from pyproject.toml.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -24,6 +31,10 @@ RUN_WORKDIR="$SLURM_SUBMIT_DIR"
 RUN_ACTIVATE=""
 RUN_MODULES=()
 PYTHON_CANDIDATE="${CLUSTER_PYTHON:-}"
+
+module load cuda/12.6
+nvcc --version
+nvidia-smi
 
 # Ensure environment modules are available in non-interactive shells.
 if [[ -f /etc/profile.d/modules.sh ]]; then
