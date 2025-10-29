@@ -2,20 +2,97 @@
 Script for making the hamiltonian.
 """
 
+from dataclasses import dataclass
 from typing import Tuple, List, Dict, Optional, Union
 import numpy as np
-from aah_code.cluster_model import v_terms_test
 import quspin
 from quspin.operators import hamiltonian
 from quspin.basis import spinful_fermion_basis_1d
 from aah_code.cluster_model.clustering import generate_clusters, convert_site_clusters_to_k
 #from aah_code.cluster_model.t_tilde import alpha_terms_by_separation
-from aah_code.cluster_model.v_terms import compute_V_couplings_bruteforce
 from aah_code.hamiltonian import benchmark_sparse_vs_dense
 from aah_code.hamiltonian import sparse_diagonalize
 from aah_code.cluster_model.v_terms_test import compute_V_via_matrix_pipeline
 from aah_code.cluster_model.t_tilde_test import alpha_terms_by_separation
 
+
+@dataclass
+class SymmetryBlock:
+    """Container describing a symmetry-preserving Hamiltonian sector."""
+    Nup: int
+    Ndn: int
+    hamiltonian: hamiltonian
+    basis: spinful_fermion_basis_1d
+
+
+@dataclass
+class SymmetryDecomposedHamiltonian:
+    """Lightweight container that yields symmetry blocks lazily."""
+    static_terms: List
+    super_cluster_size: int
+    dtype: object = np.complex64
+
+    def iter_blocks(self):
+        for n_up in range(self.super_cluster_size + 1):
+            for n_dn in range(self.super_cluster_size + 1):
+                basis_sector = spinful_fermion_basis_1d(
+                    self.super_cluster_size,
+                    Nf=(n_up, n_dn),
+                    double_occupancy=True
+                )
+                if basis_sector.Ns == 0:
+                    continue
+                H_sector = hamiltonian(self.static_terms, [], basis=basis_sector, dtype=self.dtype)
+                yield SymmetryBlock(Nup=n_up, Ndn=n_dn, hamiltonian=H_sector, basis=basis_sector)
+
+
+def _build_static_terms(supercluster_ks,
+                        supercluster_idxs,
+                        t,
+                        V,
+                        U,
+                        mu_0,
+                        L,
+                        Nc,
+                        int_sep_ratio,
+                        v_sep_ratio) -> Tuple[List, int]:
+    """Construct quspin static terms and return them along with cluster size."""
+    static = []
+    super_cluster_size = int(np.prod(supercluster_ks.shape))
+
+    print(f"Creating basis for super_cluster_size: {super_cluster_size}")
+    print(f"Supercluster k shape: {supercluster_ks.shape}")
+    print(f"Supercluster indices shape: {supercluster_idxs.shape}")
+
+    V_sep = int(L * v_sep_ratio[0] / v_sep_ratio[1])
+    int_sep = int(L * int_sep_ratio[0] / int_sep_ratio[1])
+
+    v_terms = compute_V_via_matrix_pipeline(
+        V_separation=V_sep,
+        k_sites_supercluster=supercluster_idxs,
+        L=L,
+        V0=V,
+        spinful=True
+    )
+
+    static.extend(v_terms["to_quspin_spinful"])
+
+    t_tilde_terms = alpha_terms_by_separation(supercluster_idxs, supercluster_ks, t, spin='spinful')
+    t_terms_static: List = []
+    for s in sorted(t_tilde_terms.keys()):
+        t_terms_static.extend(t_tilde_terms[s])
+    static.extend(t_terms_static)
+
+    # Add diagonal U
+    U_list = [[U, i, i] for i in range(super_cluster_size)]
+    static.append(["n|n", U_list])
+
+    # Add onsite mu_0
+    mu_0_list = [[-mu_0, i] for i in range(super_cluster_size)]
+    static.append(["n|", mu_0_list])
+    static.append(["|n", mu_0_list])
+
+    return static, super_cluster_size
 
 
 def make_cluster_ham(supercluster_ks,
@@ -28,70 +105,31 @@ def make_cluster_ham(supercluster_ks,
                     Nc,
                     int_sep_ratio,
                     v_sep_ratio,
-                    ham_lib='quspin'):
+                    ham_lib='quspin',
+                    use_symm=True):
+    """Construct the cluster Hamiltonian, optionally enabling symmetry decomposition."""
 
-    static=[]
-
-    super_cluster_size=int(np.prod(supercluster_ks.shape))
-
-
-    print(f"Creating basis for super_cluster_size: {super_cluster_size}")
-    print(f"Supercluster k shape: {supercluster_ks.shape}")
-    print(f"Supercluster indices shape: {supercluster_idxs.shape}")
-    
-    basis=spinful_fermion_basis_1d(super_cluster_size)
-
-    V_sep = int(L * v_sep_ratio[0] / v_sep_ratio[1])
-    int_sep = int(L * int_sep_ratio[0] / int_sep_ratio[1])
-
-    # v_terms = compute_V_couplings_bruteforce(
-    #     V_separation=V_sep,
-    #     k_sites_supercluster=supercluster_idxs,
-    #     L=L,
-    #     V0=V,
-    #     spinful=True,
-    #     validate=True,
-    #     atol_val=1e-8
-    # )
-
-    v_terms=compute_V_via_matrix_pipeline(
-        V_separation=V_sep,
-        k_sites_supercluster=supercluster_idxs,
-        L=L,
-        V0=V,
-        spinful=True
+    static_terms, super_cluster_size = _build_static_terms(
+        supercluster_ks,
+        supercluster_idxs,
+        t,
+        V,
+        U,
+        mu_0,
+        L,
+        Nc,
+        int_sep_ratio,
+        v_sep_ratio
     )
 
-    v_terms_static=v_terms["to_quspin_spinful"]
-    
-    
-    static.extend(v_terms_static)
+    basis = spinful_fermion_basis_1d(super_cluster_size)
 
-    
-    t_tilde_terms=alpha_terms_by_separation(supercluster_idxs,supercluster_ks,t,spin='spinful')
-    
+    if use_symm:
+        symm_container = SymmetryDecomposedHamiltonian(static_terms, super_cluster_size, dtype=np.complex64)
+        return symm_container, basis
 
-    t_terms_static = []
-	
-    for s in sorted(t_tilde_terms.keys()):
-        t_terms_static.extend(t_tilde_terms[s])
-
-    static.extend(t_terms_static)
-
-
-    
-    #Add diagonal U
-    U_list = [[U, i, i] for i in range(super_cluster_size)]
-    static.append(["n|n", U_list])
-
-    #Add onsite mu_0
-    mu_0_list = [[-mu_0, i] for i in range(super_cluster_size)]
-    static.append(["n|", mu_0_list])
-    static.append(["|n", mu_0_list])
-
-    H = hamiltonian(static, [], basis=basis, dtype=np.complex64)
-
-    return H,basis
+    H = hamiltonian(static_terms, [], basis=basis, dtype=np.complex64)
+    return H, basis
 
 
 
@@ -197,5 +235,3 @@ if __name__ == "__main__":
     # Original dense diagonalization (comment out for large systems)
     #eigvals,eigvecs=np.linalg.eigh(H.toarray())
     #print(f'eigvals: {eigvals.shape}')
-
-

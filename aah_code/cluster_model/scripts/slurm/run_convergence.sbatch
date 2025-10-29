@@ -1,10 +1,10 @@
 #!/bin/bash
-#SBATCH --job-name=aah_convergence_8
+#SBATCH --job-name=aah_fac_convergence_9
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --mem=32G
 #SBATCH --ntasks=1
-#SBATCH --time=08:00:00
+#SBATCH --time=48:00:00
 #SBATCH --partition=IllinoisComputes
 #SBATCH --account=bbradlyn-ic
 #SBATCH --mail-user=dmanningcoe@gmail.com

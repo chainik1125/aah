@@ -286,13 +286,14 @@ def run_convergence_study(
     approximants = [
         Approximant(frac)
         for frac in generate_optimal_approximants(beta, max_beta_denominator)
+        if frac.numerator not in (0,frac.denominator)  # skip trivial 1/1 approximant
     ]
     if not approximants:
         raise ValueError(
             "No Hurwitz approximants generated. "
             "Increase max_beta_denominator or check beta value."
-        )
 
+        )
     study_ts = timestamp or datetime.now().strftime("%Y%m%d-%H%M%S")
     study_dir = Path(output_root) / study_ts
     study_dir.mkdir(parents=True, exist_ok=True)

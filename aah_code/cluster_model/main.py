@@ -331,7 +331,7 @@ def run_convergence_example(U_values,V_values):
     # The AA modulation only depends on beta modulo 1, so we drop the integer part
     # to obtain the usual sequence of Hurwitz approximants (1, 1/2, 2/3, 3/5, ...).
     beta = golden_ratio % 1.0
-    max_supercluster_size = 8
+    max_supercluster_size = 9
 
     #U_values = np.unique(
     #    np.concatenate([np.linspace(0, 1, 3)])
@@ -353,9 +353,9 @@ def run_convergence_example(U_values,V_values):
     manifest = run_convergence_study(
         beta,
         max_supercluster_size=max_supercluster_size,
-        cluster_sizes=[2, 3, 4,8],
+        cluster_sizes=[2,3,4,5,6,7,8,9],
         sweep=sweep,
-        base_L=48,
+        base_L=72,
         max_beta_denominator=max_supercluster_size,
         output_root="large_files/runs/convergence_study",
     )
@@ -383,15 +383,18 @@ def run_convergence_example(U_values,V_values):
 
 if __name__ == "__main__":
     
-    U_values=[0,1e-1,5e-1,1,2,8,50]
-    V_values=[1e-6,5e-1,1,2,10]
+    U_values=[0,1e-1,1,5,50]
+    V_values=[1e-6,1e-1,2,10]
+
+    #U_values=[1,10]
+    #V_values=[1,5]
     run_convergence_example(U_values,V_values)
 
 
 
     # Legacy manual workflow reference:
     # L = 24
-    # Nc = 4
+    # Nc = 8
     # fixed_t = 1.0
     # states_retained = 6
     # U_values = np.unique(np.concatenate([np.linspace(0, 1, 3), np.linspace(2, 8, 3)]))
@@ -399,9 +402,9 @@ if __name__ == "__main__":
     # t_values = [0, 0.5, 1.0]
     # v_sep_ratio = (5, 8)
     # solver_method = "sparse_ED"
-    #
+    
     # int_sep_list = [(1, 2)]
-    #
+    
     # allowed_m = enumerate_m(L, Nc, [int(L * v_sep_ratio[0] / v_sep_ratio[1])], 8)
     # print(f"allowed_m: {allowed_m}")
     # for m in allowed_m:
@@ -411,9 +414,9 @@ if __name__ == "__main__":
     #         f\"V step n={int(L * v_sep_ratio[0] / v_sep_ratio[1])}, "
     #         f\"cluster_shapes={clusters.shape}\"
     #     )
-    #
+    
     # int_seps = [(m, L) for m in allowed_m]
-    #
+    
     # compare_int_seps_with_dmrg(
     #     v_sep_ratio=v_sep_ratio,
     #     int_sep_list=int_seps,

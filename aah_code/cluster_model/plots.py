@@ -449,6 +449,8 @@ def create_int_sep_comparison_plots(
                         y=idmrg_energies,
                         mode='lines+markers',
                         name='iDMRG',
+                        legendgroup='idmrg',
+                        legendgrouptitle=dict(text='DMRG') if col_idx == 0 else None,
                         line=dict(color=colors['DMRG'], width=3),
                         marker=dict(size=8, symbol='diamond'),
                         showlegend=(col_idx == 0)
@@ -463,6 +465,7 @@ def create_int_sep_comparison_plots(
                         y=all_results[vary_val]['fillings_idmrg'],
                         mode='lines+markers',
                         name='iDMRG',
+                        legendgroup='idmrg',
                         line=dict(color=colors['DMRG'], width=3),
                         marker=dict(size=8, symbol='diamond'),
                         showlegend=False
@@ -479,30 +482,33 @@ def create_int_sep_comparison_plots(
                     # Plot finite DMRG results
                     # Energy plot (top row)
                     fig.add_trace(
-                        go.Scatter(
-                            x=x_values,
-                            y=finite_dmrg_energies,
-                            mode='lines+markers',
-                            name=f'Finite DMRG (L={L})',
-                            line=dict(color='magenta', width=2, dash='dash'),
-                            marker=dict(size=6, symbol='triangle-up'),
-                            showlegend=(col_idx == 0)
-                        ),
-                        row=1, col=col
+                    go.Scatter(
+                        x=x_values,
+                        y=finite_dmrg_energies,
+                        mode='lines+markers',
+                        name=f'Finite DMRG (L={L})',
+                        legendgroup='finite_dmrg',
+                        legendgrouptitle=dict(text='Finite DMRG') if col_idx == 0 else None,
+                        line=dict(color='magenta', width=2, dash='dash'),
+                        marker=dict(size=6, symbol='triangle-up'),
+                        showlegend=(col_idx == 0)
+                    ),
+                    row=1, col=col
                     )
                     
                     # Filling plot (bottom row)
                     fig.add_trace(
-                        go.Scatter(
-                            x=x_values,
-                            y=all_results[vary_val]['fillings_finite_dmrg'],
-                            mode='lines+markers',
-                            name=f'Finite DMRG (L={L})',
-                            line=dict(color='magenta', width=2, dash='dash'),
-                            marker=dict(size=6, symbol='triangle-up'),
-                            showlegend=False
-                        ),
-                        row=2, col=col
+                    go.Scatter(
+                        x=x_values,
+                        y=all_results[vary_val]['fillings_finite_dmrg'],
+                        mode='lines+markers',
+                        name=f'Finite DMRG (L={L})',
+                        legendgroup='finite_dmrg',
+                        line=dict(color='magenta', width=2, dash='dash'),
+                        marker=dict(size=6, symbol='triangle-up'),
+                        showlegend=False
+                    ),
+                    row=2, col=col
                     )
             
             # Plot each int_sep configuration
@@ -523,6 +529,8 @@ def create_int_sep_comparison_plots(
                         y=all_results[vary_val][f'energies_{int_sep_key}'],
                         mode='lines+markers',
                         name=label,
+                        legendgroup=int_sep_key,
+                        legendgrouptitle=dict(text='Cluster ED') if (col_idx == 0 and idx == 0) else None,
                         line=dict(
                             color=colors[label],
                             width=2
@@ -541,6 +549,7 @@ def create_int_sep_comparison_plots(
                         y=all_results[vary_val][f'fillings_{int_sep_key}'],
                         mode='lines+markers',
                         name=label,
+                        legendgroup=int_sep_key,
                         line=dict(
                             color=colors[label],
                             width=2
