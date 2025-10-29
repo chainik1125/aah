@@ -68,12 +68,12 @@ def setup_logger(logfile: Path = DEFAULT_LOGFILE, log_level: str = None) -> logg
                 "class": "logging.FileHandler",
                 "filename": str(logfile),
                 "formatter": "default",
-                "level": "WARNING",
+                "level": "DEBUG",
             },
         },
         "root": {
             "handlers": ["console", "file"],
-            "level": log_level,
+            "level": "DEBUG",
         },
     }
 

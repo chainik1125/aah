@@ -16,7 +16,8 @@ import tenpy as tp
 from tenpy.algorithms import exact_diag
 import numpy as np
 import matplotlib.pyplot as plt
-from typing import Union
+from typing import Union, List, Optional, Tuple
+import warnings
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import plotly.io as pio
@@ -26,6 +27,28 @@ from aah_code.quspin.quspin_hamiltonian import QuSpinHamiltonian
 from quspin.operators import hamiltonian
 from quspin.basis import spin_basis_1d
 from aah_code.real_space_dmrg import run_dmrg_method, get_gnd_infinite,get_gnd
+
+try:
+    import cupy as cp  # type: ignore
+    from cupyx.scipy.sparse import csr_matrix as cupy_csr_matrix  # type: ignore
+    from cupyx.scipy.sparse.linalg import eigsh as cupy_eigsh  # type: ignore
+    try:
+        _GPU_DEVICE_COUNT = cp.cuda.runtime.getDeviceCount()
+        GPU_ACCEL_AVAILABLE = _GPU_DEVICE_COUNT > 0
+        if GPU_ACCEL_AVAILABLE:
+            device_props = []
+            for dev_id in range(_GPU_DEVICE_COUNT):
+                props = cp.cuda.runtime.getDeviceProperties(dev_id)
+                name = props['name'].decode('utf-8') if isinstance(props['name'], bytes) else props['name']
+                device_props.append(name)
+            logger.info(f"Detected CUDA devices: {device_props}")
+    except cp.cuda.runtime.CUDARuntimeError:
+        GPU_ACCEL_AVAILABLE = False
+except Exception:  # pragma: no cover - CUDA optional
+    cp = None
+    cupy_csr_matrix = None
+    cupy_eigsh = None
+    GPU_ACCEL_AVAILABLE = False
 # Set Plotly to use browser renderer to avoid nbformat issues
 #pio.renderers.default = "browser"
 
@@ -349,6 +372,98 @@ class SpectrumSolver():
 		self.save=save
 		self.ham_lib=ham_lib
 		self.solver_method=solver_method
+		self.use_gpu = GPU_ACCEL_AVAILABLE
+
+	def _build_site_number_ops(self, basis):
+		from quspin.operators import hamiltonian as _qs_hamiltonian
+		n_up_ops=[]
+		n_down_ops=[]
+		for site in range(basis.L):
+			static_up = [["n|", [[1.0, site]]]]
+			static_down = [["|n", [[1.0, site]]]]
+			n_up_ops.append(_qs_hamiltonian(static_up, [], basis=basis, dtype=np.complex128))
+			n_down_ops.append(_qs_hamiltonian(static_down, [], basis=basis, dtype=np.complex128))
+		return n_up_ops, n_down_ops
+
+	def _solve_quspin_blocks(self, symm_container, target_states):
+		selected: List[Tuple[float, np.ndarray, np.ndarray, np.ndarray]] = []
+		max_energy_cache: Optional[float] = None
+		use_gpu_global = self.use_gpu and GPU_ACCEL_AVAILABLE and self.solver_method == 'sparse_ED'
+		for block in symm_container.iter_blocks():
+			logger.debug(f"Solving sector (Nup={block.Nup}, Ndn={block.Ndn}) with dimension {block.hamiltonian.shape[0]} | GPU={use_gpu_global}")
+			import time
+			start_time = time.time()
+			ham_block = block.hamiltonian
+			basis_block = block.basis
+			block_dim = ham_block.shape[0]
+			if block_dim == 0:
+				continue
+			if target_states == 'all':
+				states_to_keep = block_dim
+			else:
+				states_to_keep = min(target_states, block_dim)
+			use_sparse = (self.solver_method == 'sparse_ED' and states_to_keep < block_dim)
+			use_gpu_block = False
+			eigvals = eigvecs = None
+			if use_gpu_global and use_sparse and cupy_csr_matrix is not None:
+				try:
+					ham_csr = ham_block.tocsr()
+					H_gpu = cupy_csr_matrix(ham_csr)
+					k_gpu = min(states_to_keep, H_gpu.shape[0] - 1)
+					if k_gpu >= 1:
+						eigvals_gpu, eigvecs_gpu = cupy_eigsh(H_gpu, k=k_gpu, which='SA')
+						eigvals = cp.asnumpy(eigvals_gpu)
+						eigvecs = cp.asnumpy(eigvecs_gpu)
+						use_gpu_block = True
+					else:
+						use_sparse = False
+				except Exception as exc:  # pragma: no cover - GPU fallback
+					warnings.warn(f"GPU solver fallback to CPU due to: {exc}")
+					use_gpu_block = False
+				finally:
+					if 'H_gpu' in locals():
+						del H_gpu
+					if 'eigvals_gpu' in locals():
+						del eigvals_gpu, eigvecs_gpu
+					if GPU_ACCEL_AVAILABLE and cp is not None:
+						cp.cuda.Stream.null.synchronize()
+						cp.get_default_memory_pool().free_all_blocks()
+			if not use_gpu_block:
+				if use_sparse:
+					eigvals, eigvecs = sparse_diagonalize(ham_block, k=states_to_keep, return_eigenvectors=True)
+					if eigvecs.ndim == 1:
+						eigvecs = eigvecs[:, np.newaxis]
+				else:
+					eigvals, eigvecs = np.linalg.eigh(ham_block.toarray())
+			logger.debug(f"Sector (Nup={block.Nup}, Ndn={block.Ndn}) solved in {time.time() - start_time:.3f}s [GPU {'yes' if use_gpu_block else 'no'}]")
+			n_up_ops, n_down_ops = self._build_site_number_ops(basis_block)
+			for idx in range(eigvecs.shape[1]):
+				energy = float(np.real(eigvals[idx]))
+				if target_states != 'all' and len(selected) == target_states:
+					if max_energy_cache is None:
+						max_energy_cache = max(selected, key=lambda x: x[0])[0]
+					if energy >= max_energy_cache:
+						continue
+				psi_vec = np.array(eigvecs[:, idx], copy=True)
+				n_up_sites = np.array([np.real(op.expt_value(psi_vec)) for op in n_up_ops])
+				n_down_sites = np.array([np.real(op.expt_value(psi_vec)) for op in n_down_ops])
+				candidate = (energy, psi_vec, n_up_sites, n_down_sites)
+				if target_states == 'all' or len(selected) < target_states:
+					selected.append(candidate)
+					max_energy_cache = None
+				else:
+					worst_idx = max(range(len(selected)), key=lambda i: selected[i][0])
+					selected[worst_idx] = candidate
+					max_energy_cache = max(selected, key=lambda x: x[0])[0]
+		if not selected:
+			raise ValueError("No eigenstates obtained from symmetry blocks")
+		selected.sort(key=lambda x: x[0])
+		energy_eigvals = np.array([r[0] for r in selected])
+		energy_eigvecs = [r[1] for r in selected]
+		n_ups = np.stack([r[2] for r in selected], axis=0)
+		n_downs = np.stack([r[3] for r in selected], axis=0)
+		n_tot = n_ups + n_downs
+		return energy_eigvals, energy_eigvecs, n_ups, n_downs, n_tot
 	def solve_spectrum(self):
 		if self.ham_lib=='tenpy':
 			#np_ham=tp.algorithms.exact_diag.get_numpy_Hamiltonian(self.hamiltonian)
@@ -384,12 +499,11 @@ class SpectrumSolver():
 			#TODO:add functionality to efficiently get smaller number of total states.
 
 		elif self.ham_lib=='quspin':
-			#Note: I need the basis as well as the hamitlonian for quspin
-			#if I want to get the more general operator expectation values
-			#i.e the spin and number operators.
-			from scipy import sparse
-			
+			# Note: need the basis alongside the Hamiltonian for quspin
 			ham,basis=self.hamiltonian
+			if hasattr(ham, "iter_blocks"):
+				target_states = self.states_retained if self.states_retained != 'all' else 'all'
+				return self._solve_quspin_blocks(ham, target_states)
 			ed_ham=ham.toarray()
 
 			if self.solver_method=='dense_ED':
@@ -405,23 +519,7 @@ class SpectrumSolver():
 			# Simplified approach: construct total number operators directly
 			from quspin.operators import hamiltonian
 			
-			# Build total number operators for each site explicitly
-			n_up_site_ops = []
-			n_down_site_ops = []
-			
-			for site in range(basis.L):
-				# Construct n_up and n_down operators for this site
-				n_up_list = [[1.0, site]]   # coefficient, site index
-				n_down_list = [[1.0, site]]
-				
-				static_up = [["n|", n_up_list]]    # spin-up number operator  
-				static_down = [["|n", n_down_list]]  # spin-down number operator
-				
-				n_up_op = hamiltonian(static_up, [], basis=basis, dtype=np.complex128)
-				n_down_op = hamiltonian(static_down, [], basis=basis, dtype=np.complex128)
-				
-				n_up_site_ops.append(n_up_op)
-				n_down_site_ops.append(n_down_op)
+			n_up_site_ops, n_down_site_ops = self._build_site_number_ops(basis)
 
 			n_ups=[]
 			n_downs=[]
@@ -2384,20 +2482,6 @@ if __name__ == "__main__":
 	system_expectations,cluster_expectations=full_spectrum_object.get_cluster_thermodynamic_expectations(cluster_spectra,temperature=None)
 
 	print(f'system energy: {system_expectations[0]},system number: {system_expectations[1]},system_spins: {system_expectations[2]}')
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

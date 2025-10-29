@@ -5,8 +5,6 @@ description = "AAH v0: matched case energy"
 requires-python = ">=3.11"
 readme = "README.md"
 dependencies = [
-    "torch",
-    "torchvision",
     "pydantic",
     "wandb",
     "fire",
@@ -18,92 +16,54 @@ dependencies = [
     "physics-tenpy",
     "python-dotenv",
     "tabulate",
+    "quspin",
+    "pandas",
+    "scipy",
+    "cupy-cuda12x",
 ]
-
-
 
 [project.optional-dependencies]
 
-
 [build-system]
-requires = ["setuptools", "wheel"]
+requires = [
+    "setuptools",
+    "wheel",
+]
 build-backend = "setuptools.build_meta"
 
-
-
-
-
-#Apollo stuff that I'm not going to use this time around
-
-#dev = [
-#    "ruff",
-#    "pyright",
-#    "pre-commit",
-#]
-
-
-#[tool.setuptools]
-#packages = ["aah"]
-
-#[tool.ruff]
-#line-length = 100
-#fix = true
-
-#[tool.ruff.lint]
-#select = [
-#    # pycodestyle
-#    "E",
-#    # Pyflakes
-#    "F",
-#    # pyupgrade
-#    "UP",
-#    # flake8-bugbear
-#    "B",
-#    # flake8-simplify
-#    "SIM",
-#    # isort
-#    "I",
-#]
-
-#[tool.ruff.format]
-# Enable reformatting of code snippets in docstrings.
-#docstring-code-format = true
-
-#[tool.ruff.isort]
-#known-third-party = ["wandb"]
-
-#[tool.pyright]
-#include = ["aah", "tests"]
-
-#strictListInference = true
-#strictDictionaryInference = true
-#strictSetInference = true
-#reportFunctionMemberAccess = true
-#reportUnknownParameterType = true
-#reportIncompatibleMethodOverride = true
-#reportIncompatibleVariableOverride = true
-#reportInconsistentConstructorType = true
-#reportOverlappingOverload = true
-#reportConstantRedefinition = true
-#reportImportCycles = true
-#reportPropertyTypeMismatch = true
-#reportMissingTypeArgument = true
-#reportUnnecessaryCast = true
-#reportUnnecessaryComparison = true
-#reportUnnecessaryContains = true
-#reportUnusedExpression = true
-#reportMatchNotExhaustive = true
-#reportShadowedImports = true
-#reportPrivateImportUsage = false
-
-#[tool.setuptools]
-#package-dir = {"" = "aah"}   # <-- if you really want to point at a sub-folder
-
-#[tool.setuptools.packages.find]
-#where = ["."]
-
-
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["aah_code*"]
+where = [
+    ".",
+]
+include = [
+    "aah_code*",
+]
 
+[tool.cluster.remote]
+user = "dmitry2"
+host = "cc-login.campuscluster.illinois.edu"
+project_root = "/projects/illinois/eng/physics/bbradlyn/dmitry2/k_blocking/new_code"
+
+[tool.cluster.rsync]
+excludes = [
+    ".venv/",
+]
+delete = true
+
+[tool.cluster.sbatch]
+script = "aah/aah_code/cluster_model/scripts/slurm/run_convergence.sbatch"
+extra_args = ""
+
+[tool.cluster.environment]
+modules = [
+    "anaconda3/2024.10",
+    "cuda/12.6",
+]
+activate = "source activate torch_env"
+
+[tool.cluster.environment.variables]
+
+[tool.cluster.run]
+working_dir = "."
+command = "python -m aah_code.cluster_model.main"
+args = []

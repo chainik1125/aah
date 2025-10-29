@@ -1,4 +1,3 @@
-import torch
 import numpy as np
 from aah_code.clusters import ClusterExperiment
 from aah_code.basis import LocalClusterBasis
@@ -128,4 +127,3 @@ def assert_free_fermion_consistency(model, atol=1e-9, verbose=False, max_orbital
             print("N=1 check passed; consider lowering L or raising max_orbitals for full MB test.")
 
     return {"eps_up": eps_up, "eps_down": eps_down}
-
