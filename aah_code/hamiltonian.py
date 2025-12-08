@@ -2353,7 +2353,7 @@ def expectations_plot_combined(physical_params: HamiltonianParams):
 		dmrg_totals[component] = np.sum(dmrg_dict[component])
 		mismatched_totals[component] = np.sum(mismatched_cluster_dict[component])
 	
-	print(f'mismatched components: {np.array(mismatched_totals.values()).sum()},total energy: {mismatched_totals['total_energy'].sum()}')
+	print(f"mismatched components: {np.array(mismatched_totals.values()).sum()},total energy: {mismatched_totals['total_energy'].sum()}")
 	exit()
 
 	methods = ['DMRG', 'Mismatched Cluster']

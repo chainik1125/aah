@@ -10,8 +10,10 @@ Int_sep configurations: [(1, 2), (1, 4), (1, 8)]
 DMRG: chi=32
 X-axis (t): [0.  0.5 1.  2. ]
 Varying parameter (V): [1.e-06 1.e+00 2.e+00]
-V values:   0%|                                           | 0/3 [00:00<?, ?it/s]
-  t (V=0.00):   0%|                                       | 0/4 [00:00<?, ?it/s][Acluster_k_no_last_dim shape: (2, 2)
+
+V values:   0%|                                           | 0/3 [00:00<?, ?it/s]
+
+  t (V=0.00):   0%|                                       | 0/4 [00:00<?, ?it/s][Acluster_k_no_last_dim shape: (2, 2)
 cluster_k: [[[-1. ]
   [ 0. ]]
 
@@ -579,8 +581,8 @@ Hermiticity check passed!
 Symmetry checks passed!
 Hermiticity check passed!
 Symmetry checks passed!
-Hermiticity check passed!
 Symmetry checks passed!
+Hermiticity check passed!
 cluster_k_no_last_dim shape: (2, 2)
 cluster_k: [[[-0.525]
   [ 0.475]]
@@ -1400,7 +1402,8 @@ Supercluster k shape: (4, 2)
 Supercluster indices shape: (4, 2)
 Hermiticity check passed!
 Symmetry checks passed!
-  t (V=0.00):  25%|███████▊                       | 1/4 [01:38<04:55, 98.41s/it][A/Users/dmitrymanning-coe/Documents/Research/Barry Bradlyn/Moire/K_blocking/new_code/aah/.venv/lib/python3.12/site-packages/tenpy/algorithms/mps_common.py:792: TenpyInconsistencyWarning:
+
+  t (V=0.00):  25%|███████▊                       | 1/4 [01:38<04:55, 98.41s/it][A/Users/dmitrymanning-coe/Documents/Research/Barry Bradlyn/Moire/K_blocking/new_code/aah/.venv/lib/python3.12/site-packages/tenpy/algorithms/mps_common.py:792: TenpyInconsistencyWarning:
 
 Maximum truncation error (``max_trunc_err``) exceeded.
 
@@ -3160,7 +3163,8 @@ Symmetry checks passed!
 Hermiticity check passed!
 Symmetry checks passed!
 Hermiticity check passed!
-  t (V=0.00):  50%|███████████████               | 2/4 [05:30<05:54, 177.17s/it][A/Users/dmitrymanning-coe/Documents/Research/Barry Bradlyn/Moire/K_blocking/new_code/aah/.venv/lib/python3.12/site-packages/tenpy/algorithms/mps_common.py:792: TenpyInconsistencyWarning:
+
+  t (V=0.00):  50%|███████████████               | 2/4 [05:30<05:54, 177.17s/it][A/Users/dmitrymanning-coe/Documents/Research/Barry Bradlyn/Moire/K_blocking/new_code/aah/.venv/lib/python3.12/site-packages/tenpy/algorithms/mps_common.py:792: TenpyInconsistencyWarning:
 
 Maximum truncation error (``max_trunc_err``) exceeded.
 
@@ -4919,7 +4923,8 @@ Hermiticity check passed!
 Symmetry checks passed!
 Hermiticity check passed!
 Symmetry checks passed!
-  t (V=0.00):  75%|██████████████████████▌       | 3/4 [08:53<03:08, 188.66s/it][A/Users/dmitrymanning-coe/Documents/Research/Barry Bradlyn/Moire/K_blocking/new_code/aah/.venv/lib/python3.12/site-packages/tenpy/algorithms/mps_common.py:792: TenpyInconsistencyWarning:
+
+  t (V=0.00):  75%|██████████████████████▌       | 3/4 [08:53<03:08, 188.66s/it][A/Users/dmitrymanning-coe/Documents/Research/Barry Bradlyn/Moire/K_blocking/new_code/aah/.venv/lib/python3.12/site-packages/tenpy/algorithms/mps_common.py:792: TenpyInconsistencyWarning:
 
 Maximum truncation error (``max_trunc_err``) exceeded.
 
@@ -6678,8 +6683,11 @@ Symmetry checks passed!
 Hermiticity check passed!
 Symmetry checks passed!
 Hermiticity check passed!
-  t (V=0.00): 100%|██████████████████████████████| 4/4 [19:04<00:00, 355.42s/it][A
-                                                                                [AV values:  33%|███████████                      | 1/3 [19:04<38:08, 1144.10s/it]
+
+  t (V=0.00): 100%|██████████████████████████████| 4/4 [19:04<00:00, 355.42s/it][A
+
+                                                                                [A
+V values:  33%|███████████                      | 1/3 [19:04<38:08, 1144.10s/it]
 Symmetry checks passed!
 Hermiticity check passed!
 Symmetry checks passed!
@@ -7025,7 +7033,8 @@ k points shape: (10, 4, 2, 1),
  energies shape: (10, 6),
  number_spectrum shape: (10, 6, 8), spin spectrum shape: (10, 2, 6, 8)
 
-  t (V=1.00):   0%|                                       | 0/4 [00:00<?, ?it/s][Acluster_k_no_last_dim shape: (2, 2)
+
+  t (V=1.00):   0%|                                       | 0/4 [00:00<?, ?it/s][Acluster_k_no_last_dim shape: (2, 2)
 cluster_k: [[[-1. ]
   [ 0. ]]
 
@@ -8414,7 +8423,8 @@ Supercluster k shape: (4, 2)
 Supercluster indices shape: (4, 2)
 Hermiticity check passed!
 Symmetry checks passed!
-  t (V=1.00):  25%|███████▌                      | 1/4 [01:43<05:10, 103.45s/it][A/Users/dmitrymanning-coe/Documents/Research/Barry Bradlyn/Moire/K_blocking/new_code/aah/.venv/lib/python3.12/site-packages/tenpy/algorithms/mps_common.py:792: TenpyInconsistencyWarning:
+
+  t (V=1.00):  25%|███████▌                      | 1/4 [01:43<05:10, 103.45s/it][A/Users/dmitrymanning-coe/Documents/Research/Barry Bradlyn/Moire/K_blocking/new_code/aah/.venv/lib/python3.12/site-packages/tenpy/algorithms/mps_common.py:792: TenpyInconsistencyWarning:
 
 Maximum truncation error (``max_trunc_err``) exceeded.
 
@@ -10174,7 +10184,8 @@ Symmetry checks passed!
 Hermiticity check passed!
 Symmetry checks passed!
 Hermiticity check passed!
-  t (V=1.00):  50%|██████████████▌              | 2/4 [32:05<37:08, 1114.31s/it][A/Users/dmitrymanning-coe/Documents/Research/Barry Bradlyn/Moire/K_blocking/new_code/aah/.venv/lib/python3.12/site-packages/tenpy/algorithms/mps_common.py:792: TenpyInconsistencyWarning:
+
+  t (V=1.00):  50%|██████████████▌              | 2/4 [32:05<37:08, 1114.31s/it][A/Users/dmitrymanning-coe/Documents/Research/Barry Bradlyn/Moire/K_blocking/new_code/aah/.venv/lib/python3.12/site-packages/tenpy/algorithms/mps_common.py:792: TenpyInconsistencyWarning:
 
 Maximum truncation error (``max_trunc_err``) exceeded.
 
@@ -11933,7 +11944,8 @@ Hermiticity check passed!
 Symmetry checks passed!
 Hermiticity check passed!
 Symmetry checks passed!
-  t (V=1.00):  75%|██████████████████████▌       | 3/4 [44:42<15:51, 951.29s/it][A/Users/dmitrymanning-coe/Documents/Research/Barry Bradlyn/Moire/K_blocking/new_code/aah/.venv/lib/python3.12/site-packages/tenpy/algorithms/mps_common.py:792: TenpyInconsistencyWarning:
+
+  t (V=1.00):  75%|██████████████████████▌       | 3/4 [44:42<15:51, 951.29s/it][A/Users/dmitrymanning-coe/Documents/Research/Barry Bradlyn/Moire/K_blocking/new_code/aah/.venv/lib/python3.12/site-packages/tenpy/algorithms/mps_common.py:792: TenpyInconsistencyWarning:
 
 Maximum truncation error (``max_trunc_err``) exceeded.
 
@@ -13692,8 +13704,11 @@ Symmetry checks passed!
 Hermiticity check passed!
 Symmetry checks passed!
 Hermiticity check passed!
-  t (V=1.00): 100%|██████████████████████████████| 4/4 [48:10<00:00, 657.75s/it][A
-                                                                                [AV values:  67%|████████████████████▋          | 2/3 [1:07:14<36:11, 2171.35s/it]
+
+  t (V=1.00): 100%|██████████████████████████████| 4/4 [48:10<00:00, 657.75s/it][A
+
+                                                                                [A
+V values:  67%|████████████████████▋          | 2/3 [1:07:14<36:11, 2171.35s/it]
 Symmetry checks passed!
 Hermiticity check passed!
 Symmetry checks passed!
@@ -14039,7 +14054,8 @@ k points shape: (10, 4, 2, 1),
  energies shape: (10, 6),
  number_spectrum shape: (10, 6, 8), spin spectrum shape: (10, 2, 6, 8)
 
-  t (V=2.00):   0%|                                       | 0/4 [00:00<?, ?it/s][Acluster_k_no_last_dim shape: (2, 2)
+
+  t (V=2.00):   0%|                                       | 0/4 [00:00<?, ?it/s][Acluster_k_no_last_dim shape: (2, 2)
 cluster_k: [[[-1. ]
   [ 0. ]]
 
@@ -15428,7 +15444,8 @@ Supercluster k shape: (4, 2)
 Supercluster indices shape: (4, 2)
 Hermiticity check passed!
 Symmetry checks passed!
-  t (V=2.00):  25%|███████▌                      | 1/4 [01:40<05:02, 100.87s/it][A
+
+  t (V=2.00):  25%|███████▌                      | 1/4 [01:40<05:02, 100.87s/it][A
 Sparse ED: computed 6 eigenvalues
 Hermiticity check passed!
 Symmetry checks passed!
@@ -17184,7 +17201,8 @@ Symmetry checks passed!
 Hermiticity check passed!
 Symmetry checks passed!
 Hermiticity check passed!
-  t (V=2.00):  50%|███████████████               | 2/4 [05:31<05:54, 177.16s/it][A/Users/dmitrymanning-coe/Documents/Research/Barry Bradlyn/Moire/K_blocking/new_code/aah/.venv/lib/python3.12/site-packages/tenpy/algorithms/mps_common.py:792: TenpyInconsistencyWarning:
+
+  t (V=2.00):  50%|███████████████               | 2/4 [05:31<05:54, 177.16s/it][A/Users/dmitrymanning-coe/Documents/Research/Barry Bradlyn/Moire/K_blocking/new_code/aah/.venv/lib/python3.12/site-packages/tenpy/algorithms/mps_common.py:792: TenpyInconsistencyWarning:
 
 Maximum truncation error (``max_trunc_err``) exceeded.
 
@@ -18943,7 +18961,8 @@ Hermiticity check passed!
 Symmetry checks passed!
 Hermiticity check passed!
 Symmetry checks passed!
-  t (V=2.00):  75%|██████████████████████▌       | 3/4 [09:04<03:13, 193.69s/it][A/Users/dmitrymanning-coe/Documents/Research/Barry Bradlyn/Moire/K_blocking/new_code/aah/.venv/lib/python3.12/site-packages/tenpy/algorithms/mps_common.py:792: TenpyInconsistencyWarning:
+
+  t (V=2.00):  75%|██████████████████████▌       | 3/4 [09:04<03:13, 193.69s/it][A/Users/dmitrymanning-coe/Documents/Research/Barry Bradlyn/Moire/K_blocking/new_code/aah/.venv/lib/python3.12/site-packages/tenpy/algorithms/mps_common.py:792: TenpyInconsistencyWarning:
 
 Maximum truncation error (``max_trunc_err``) exceeded.
 
@@ -20702,8 +20721,12 @@ Symmetry checks passed!
 Hermiticity check passed!
 Symmetry checks passed!
 Hermiticity check passed!
-  t (V=2.00): 100%|██████████████████████████████| 4/4 [12:35<00:00, 200.51s/it][A
-                                                                                [AV values: 100%|███████████████████████████████| 3/3 [1:19:50<00:00, 1524.97s/it]V values: 100%|███████████████████████████████| 3/3 [1:19:50<00:00, 1596.77s/it]
+
+  t (V=2.00): 100%|██████████████████████████████| 4/4 [12:35<00:00, 200.51s/it][A
+
+                                                                                [A
+V values: 100%|███████████████████████████████| 3/3 [1:19:50<00:00, 1524.97s/it]
+V values: 100%|███████████████████████████████| 3/3 [1:19:50<00:00, 1596.77s/it]
 
 Symmetry checks passed!
 Hermiticity check passed!
@@ -21082,3 +21105,18 @@ V=2.00:
   int_sep=(1, 2) vs Finite DMRG: MAE=0.006254
   int_sep=(1, 4) vs Finite DMRG: MAE=0.006254
   int_sep=(1, 8) vs Finite DMRG: MAE=0.006251
+Loaded environment from /Users/dmitrymanning-coe/Documents/Research/Barry Bradlyn/Moire/K_blocking/new_code/aah/.env
+============================================================
+Comparing 7 int_sep configurations with iDMRG and finite DMRG
+============================================================
+System: L=24, Nc=8
+Fixed parameter: t=1
+Fixed v_sep=(1, 8)
+Int_sep configurations: [(1, 8), (2, 8), (3, 8), (4, 8), (5, 8), (6, 8), (7, 8)]
+DMRG: chi=64
+X-axis (U): [ 0.   0.1  0.5  1.   2.   3.   5.  10.  15.  20. ]
+Varying parameter (V): [1.e-06]
+
+V values:   0%|                                           | 0/1 [00:00<?, ?it/s]
+
+  U (V=0.00):   0%|                                      | 0/10 [00:00<?, ?it/s][A

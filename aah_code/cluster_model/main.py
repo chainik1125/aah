@@ -11,6 +11,7 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+
 try:
     from tqdm import tqdm
 except ImportError:
@@ -29,6 +30,7 @@ from aah_code.cluster_model.convergence_workflow import (
 )
 from aah_code.cluster_model.model import ClusterModelConfig, PhysicalParams
 from aah_code.cluster_model.run_scripts_me import get_general_expectations
+from aah_code.cluster_model.plots import compare_int_seps_with_dmrg, compare_cluster_sizes_with_dmrg, compare_U_values_with_dmrg
 from aah_code.real_space_dmrg import run_dmrg_method
 
 def three_way_comparison_with_dmrg(
@@ -331,7 +333,8 @@ def run_convergence_example(U_values,V_values):
     # The AA modulation only depends on beta modulo 1, so we drop the integer part
     # to obtain the usual sequence of Hurwitz approximants (1, 1/2, 2/3, 3/5, ...).
     beta = golden_ratio % 1.0
-    max_supercluster_size = 4
+    beta=1/4
+    max_supercluster_size = 8
 
     #U_values = np.unique(
     #    np.concatenate([np.linspace(0, 1, 3)])
@@ -353,7 +356,7 @@ def run_convergence_example(U_values,V_values):
     manifest = run_convergence_study(
         beta,
         max_supercluster_size=max_supercluster_size,
-        cluster_sizes=[2,3,4],
+        cluster_sizes=[2,4,8],
         sweep=sweep,
         base_L=24,
         max_beta_denominator=max_supercluster_size,
@@ -383,27 +386,27 @@ def run_convergence_example(U_values,V_values):
 
 if __name__ == "__main__":
     
-    U_values=[0,1e-1,1,5,50]
-    V_values=[1e-6,1e-1,2,10]
+    U_values=[0,1,5,50]
+    V_values=[1e-6,5e-1,2,10]
 
     #U_values=[1,10]
     #V_values=[1,5]
-    run_convergence_example(U_values,V_values)
+    # run_convergence_example(U_values,V_values)
 
 
 
     # Legacy manual workflow reference:
-    # L = 24
-    # Nc = 8
-    # fixed_t = 1.0
-    # states_retained = 6
-    # U_values = np.unique(np.concatenate([np.linspace(0, 1, 3), np.linspace(2, 8, 3)]))
-    # V_values = [1e-6, 1.0, 2.0]
-    # t_values = [0, 0.5, 1.0]
-    # v_sep_ratio = (5, 8)
-    # solver_method = "sparse_ED"
+    L = 24
+    Nc = 8
+    fixed_t = 1
+    states_retained = 6
+    U_values = [0,1]#[0,1,2,3,5,10,15,20,30,100]#np.unique(np.concatenate([np.linspace(0, 1, 3), np.linspace(2, 8, 3)]))
+    V_values = [1e-6,1e-1,2e-1,5e-1,1,2,3,4]#[1e-6,1,10]#[1e-6, 1.0, 2.0,10]
+    t_values = [0, 0.5, 1.0]
+    v_sep_ratio = (1, 8)
+    solver_method = "sparse_ED"
     
-    # int_sep_list = [(1, 2)]
+    int_sep_list = [(1,8),(2,8),(3,8),(4,8),(5,8),(6,8),(7,8)]
     
     # allowed_m = enumerate_m(L, Nc, [int(L * v_sep_ratio[0] / v_sep_ratio[1])], 8)
     # print(f"allowed_m: {allowed_m}")
@@ -417,24 +420,62 @@ if __name__ == "__main__":
     
     # int_seps = [(m, L) for m in allowed_m]
     
+    # chi=64
     # compare_int_seps_with_dmrg(
-    #     v_sep_ratio=v_sep_ratio,
-    #     int_sep_list=int_seps,
-    #     x_axis={"U": U_values},
-    #     varying_parameter={"V": V_values},
+    #     v_sep_ratio=(1,3),
+    #     int_sep_list=[(1,3),(1,6)],
+    #     x_axis={"U": [0,1e-1,5e-1,1,5,10,]},
+    #     varying_parameter={"V": [1e-6,5e-1,1]},
     #     fixed_parameter={"t": fixed_t},
     #     L=L,
-    #     Nc=Nc,
+    #     Nc=3,
+    #     chi=32,
     #     solver_method=solver_method,
     #     states_retained=states_retained,
-    #     include_idmrg=False,
+    #     include_idmrg=True,
     #     include_finite_dmrg=True,
     # )
-    #     U_values=U_values,
-    #     V_values=V_values,
-    #     L=L,
-    #     Nc=Nc,
-    #     t=t,
-    #     solver_method=solver_method,
-    #     states_retained=states_retained
-    # )
+
+    #Non sensible large_files/plots/cluster_size_convergence_L36_chi32_20251114_194522.pkl
+
+#     fig, results = compare_cluster_sizes_with_dmrg(
+#     v_sep_ratio=(1, 2),
+#     int_sep_ratios={4:(1,4),8:(1,8)},
+#     cluster_sizes=[4,8],
+#     U_values=[0,1e-1, 5e-1, 1.0, 5,10],
+#     V_values=[1e-6],
+#     L=32,
+#     t=1.0,
+#     solver_method='sparse_ED',
+#     states_retained=6,
+#     chi=32,
+#     log_yaxis=False,
+#     results=None,#'large_files/plots/cluster_size_convergence_L24_chi32_20251114_191504.pkl',
+#     save_html=True,
+#     show_plots=True
+# )
+
+
+
+       
+
+    # Example usage of the new function:
+    fig, results = compare_U_values_with_dmrg(
+        v_sep_ratio=(1, 2),
+        int_sep_ratios={2: (1, 2),4:(1,4),8:(1,8),10:(1,10)},
+        cluster_sizes=[2,4,8,10],
+        U_values=[0, 1e-1, 5e-1, 1.0,2,3, 5,8, 10],
+        V_values=[1e-6, 0.5, 1.0],
+        L=40,
+        t=1.0,
+        solver_method='sparse_ED',
+        states_retained=6,
+        chi=64,
+        log_yaxis=False,  # Plot energies on linear scale
+        include_idmrg=True,
+        include_finite_dmrg=True,
+        save_data=True,
+        save_html=True,
+        show_plots=True
+    )
+    

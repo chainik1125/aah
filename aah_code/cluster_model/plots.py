@@ -6,10 +6,11 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import plotly.io as pio
-from typing import Tuple, List
+from typing import Tuple, List, Dict, Optional, Sequence, Union
 import os
 import pickle
 from datetime import datetime
+from pathlib import Path
 
 from aah_code.cluster_model.model import ClusterModelConfig, PhysicalParams
 from aah_code.cluster_model.run_scripts_me import get_general_expectations
@@ -23,6 +24,23 @@ try:
 except ImportError:
     def tqdm(iterable, desc=None):
         return iterable
+
+
+def format_sep_as_pi(sep_tuple: Tuple[int, int]) -> str:
+    """Convert separation ratio to π fraction notation."""
+    numerator = 2 * sep_tuple[0]
+    denominator = sep_tuple[1]
+    if denominator == 0:
+        return "undefined"
+    if numerator == denominator:
+        return 'π'
+    if numerator == 1:
+        return f'π/{denominator}'
+    from fractions import Fraction
+    frac = Fraction(numerator, denominator)
+    if frac.denominator == 1:
+        return f'{frac.numerator}π'
+    return f'{frac.numerator}π/{frac.denominator}'
 
 
 def compare_int_seps_with_dmrg(
@@ -396,22 +414,6 @@ def create_int_sep_comparison_plots(
     color_palette = ['blue', 'green', 'orange', 'purple', 'brown', 'pink', 'cyan']
     colors = {'DMRG': 'red'}
     
-    # Helper function to format separation as fraction of π
-    def format_sep_as_pi(sep_tuple):
-        """Convert separation ratio to π fraction notation."""
-        numerator = 2 * sep_tuple[0]
-        denominator = sep_tuple[1]
-        if numerator == denominator:
-            return 'π'
-        elif numerator == 1:
-            return f'π/{denominator}'
-        else:
-            from fractions import Fraction
-            frac = Fraction(numerator, denominator)
-            if frac.denominator == 1:
-                return f'{frac.numerator}π'
-            return f'{frac.numerator}π/{frac.denominator}'
-    
     for idx, int_sep in enumerate(int_sep_list):
         int_sep_key = f'int_sep {format_sep_as_pi(int_sep)}'
         colors[int_sep_key] = color_palette[idx % len(color_palette)]
@@ -632,6 +634,428 @@ def create_int_sep_comparison_plots(
     return figures
 
 
+def compare_cluster_sizes_with_dmrg(
+    v_sep_ratio: Tuple[int, int],
+    int_sep_ratios: Union[Tuple[int, int], Dict[int, Tuple[int, int]]],
+    cluster_sizes: Sequence[int],
+    U_values: Sequence[float],
+    V_values: Sequence[float],
+    *,
+    t: float = 1.0,
+    L: int = 20,
+    chi: int = 32,
+    solver_method: str = 'dense_ED',
+    states_retained: int = 4,
+    output_dir: str = 'large_files/plots',
+    show_plots: bool = True,
+    save_html: bool = True,
+    save_pickle: bool = True,
+    filename_prefix: str = 'cluster_size_convergence',
+    log_yaxis: bool = True,
+    reference_scheme: str = 'idmrg',
+    results: Optional[Union[Dict, str, os.PathLike]] = None,
+) -> Tuple[go.Figure, Dict]:
+    """
+    Plot how the cluster method converges to iDMRG as the cluster size (N_c) increases.
+
+    Each subplot fixes a value of U. Within that subplot the x-axis enumerates
+    the provided cluster sizes and each line corresponds to a different V value.
+    The y-axis shows |E_DMRG - E_cluster| / |E_DMRG|.
+
+    Args:
+        v_sep_ratio: Ratio controlling the AA modulation for V (passed to both
+            cluster calculations and DMRG).
+        int_sep_ratios: Either a single (p, q) tuple applied to every cluster
+            size or a dict mapping each N_c to its specific interaction
+            separation ratio.
+        cluster_sizes: Iterable of cluster sizes (N_c) to test.
+        U_values: Iterable of U values; each becomes its own subplot.
+        V_values: Iterable of V strengths; each becomes a separate line.
+        t: Hopping parameter.
+        L: System size used for the cluster method.
+        chi: Bond dimension for iDMRG.
+        solver_method: Diagonalisation backend for the cluster Hamiltonian.
+        states_retained: Number of states retained in the cluster solver.
+        output_dir: Directory for saved artifacts.
+        show_plots: Whether to open the generated Plotly figure.
+        save_html: If True, save the interactive figure as HTML.
+        save_pickle: If True, pickle the raw numerical results.
+        filename_prefix: Prefix for saved artifact names.
+        log_yaxis: Plot the y-axis on a log scale to highlight asymptotics.
+        reference_scheme: Either 'idmrg' (default) or 'finite_dmrg' to choose
+            which DMRG variant provides the reference energies.
+
+    Returns:
+        (figure, results_dict)
+    """
+
+    if t is None:
+        raise ValueError("Parameter t must be specified for the cluster calculations.")
+
+    def _coerce_ratio(value, label: str) -> Tuple[int, int]:
+        if value is None:
+            raise ValueError(f"{label} ratio must be provided.")
+        if isinstance(value, np.ndarray):
+            value = value.tolist()
+        if not isinstance(value, (list, tuple)) or len(value) != 2:
+            raise ValueError(f"{label} ratio must be a length-2 iterable, got {value!r}.")
+        try:
+            p = int(round(value[0]))
+            q = int(round(value[1]))
+        except Exception as exc:
+            raise ValueError(f"Could not parse {label} ratio {value!r} into integers.") from exc
+        if q == 0:
+            raise ValueError(f"Denominator for {label} ratio cannot be zero.")
+        return (p, q)
+
+    cluster_sizes = sorted({int(size) for size in cluster_sizes})
+    if not cluster_sizes:
+        raise ValueError("Provide at least one cluster size (N_c).")
+
+    U_values = np.asarray(U_values, dtype=float)
+    V_values = np.asarray(V_values, dtype=float)
+    if U_values.ndim != 1 or U_values.size == 0:
+        raise ValueError("U_values must be a 1-D array with at least one entry.")
+    if V_values.ndim != 1 or V_values.size == 0:
+        raise ValueError("V_values must be a 1-D array with at least one entry.")
+
+    u_list = [float(u) for u in U_values]
+    v_list = [float(v) for v in V_values]
+
+    v_sep_ratio = _coerce_ratio(v_sep_ratio, "V separation")
+
+    reference_scheme = reference_scheme.lower()
+    if reference_scheme not in {'idmrg', 'finite_dmrg'}:
+        raise ValueError("reference_scheme must be either 'idmrg' or 'finite_dmrg'.")
+
+    if isinstance(int_sep_ratios, dict):
+        ratio_map: Dict[int, Tuple[int, int]] = {}
+        for Nc in cluster_sizes:
+            if Nc not in int_sep_ratios:
+                raise ValueError(f"No int_sep ratio provided for cluster size Nc={Nc}.")
+            ratio_map[Nc] = _coerce_ratio(int_sep_ratios[Nc], f"int_sep (Nc={Nc})")
+    else:
+        common_ratio = _coerce_ratio(int_sep_ratios, "int_sep")
+        ratio_map = {Nc: common_ratio for Nc in cluster_sizes}
+
+    cluster_results: Dict[Tuple[int, float], np.ndarray]
+    dmrg_cache: np.ndarray
+    failed_calculations: List[Dict] = []
+
+    if results is not None:
+        if isinstance(results, (str, os.PathLike)):
+            results_path = Path(results)
+            if not results_path.exists():
+                raise ValueError(f"Results file not found: {results_path}")
+            with open(results_path, 'rb') as fh:
+                results = pickle.load(fh)
+        elif not isinstance(results, dict):
+            raise ValueError("results must be a dict or path-like object when provided.")
+
+        save_pickle = False  # Avoid re-saving when plotting from cached data
+        print("Using precomputed results payload; skipping new simulations.")
+        params = results.get('parameters', {})
+        dmrg_cache = np.asarray(results.get('dmrg_energies', []), dtype=float)
+        serialized_clusters = results.get('cluster_energies', {})
+        cluster_results = {}
+
+        if dmrg_cache.shape != (len(u_list), len(v_list)):
+            raise ValueError("Provided dmrg_energies shape does not match U and V grids.")
+
+        for Nc in cluster_sizes:
+            cluster_by_v = serialized_clusters.get(str(Nc)) or serialized_clusters.get(Nc)
+            if cluster_by_v is None:
+                raise ValueError(f"Results payload missing data for cluster size Nc={Nc}.")
+            for V in v_list:
+                series = cluster_by_v.get(str(V)) or cluster_by_v.get(V)
+                if series is None:
+                    raise ValueError(f"Results payload missing data for V={V} at Nc={Nc}.")
+                arr = np.asarray(series, dtype=float)
+                if arr.size != len(u_list):
+                    raise ValueError(f"Cluster series for Nc={Nc}, V={V} has length {arr.size}, expected {len(u_list)}.")
+                cluster_results[(Nc, V)] = arr
+
+        # Override metadata from results where available
+        stored_ratio_map = results.get('int_sep_ratios')
+        if stored_ratio_map:
+            converted_ratio_map = {}
+            for key, val in stored_ratio_map.items():
+                try:
+                    Nc_key = int(key)
+                except (TypeError, ValueError):
+                    Nc_key = key
+                converted_ratio_map[Nc_key] = _coerce_ratio(val, f"int_sep (Nc={Nc_key})")
+            ratio_map = converted_ratio_map
+        params_v_sep = results.get('parameters', {}).get('v_sep_ratio', v_sep_ratio)
+        v_sep_ratio = _coerce_ratio(params_v_sep, "V separation")
+        t = params.get('t', t)
+        L = params.get('L', L)
+        chi = params.get('chi', chi)
+        states_retained = params.get('states_retained', states_retained)
+        reference_scheme = params.get('reference_scheme', reference_scheme)
+    else:
+        # Storage for computed energies
+        cluster_results = {
+            (Nc, V): np.full(len(u_list), np.nan, dtype=float)
+            for Nc in cluster_sizes
+            for V in v_list
+        }
+        dmrg_cache = np.full((len(u_list), len(v_list)), np.nan, dtype=float)
+
+        print("=" * 60)
+        ref_label = "iDMRG" if reference_scheme == 'idmrg' else "finite DMRG"
+        print(f"Computing {ref_label} reference energies")
+        print("=" * 60)
+        for u_idx, U in enumerate(u_list):
+            mu_0 = U / 2.0
+            for v_idx, V in enumerate(v_list):
+                try:
+                    if reference_scheme == 'idmrg':
+                        energy_dmrg, filling_dmrg, _ = run_dmrg_method(
+                            U=U,
+                            mu_0=mu_0,
+                            V=V,
+                            V_sep=v_sep_ratio,
+                            t=t,
+                            system_size=L,
+                            chi=chi,
+                        )
+                        dmrg_value = energy_dmrg + mu_0 * filling_dmrg
+                    else:
+                        energy_finite, _, filling_finite = get_gnd(
+                            L=L,
+                            chi=chi,
+                            U=U,
+                            t=t,
+                            mu=mu_0,
+                            V=V,
+                            V_sep=v_sep_ratio,
+                        )
+                        energy_finite_per_site = energy_finite / L
+                        dmrg_value = energy_finite_per_site + mu_0 * filling_finite
+
+                    dmrg_cache[u_idx, v_idx] = dmrg_value
+                except Exception as exc:
+                    failed_calculations.append({
+                        'method': ref_label,
+                        'params': {'U': U, 'V': V},
+                        'error': str(exc),
+                    })
+
+        print("\n")
+        print("=" * 60)
+        print("Running cluster calculations for each N_c")
+        print("=" * 60)
+        for Nc in tqdm(cluster_sizes, desc="Cluster sizes", ncols=80):
+            int_sep_ratio = ratio_map[Nc]
+            for v_idx, V in enumerate(v_list):
+                for u_idx, U in enumerate(u_list):
+                    mu_0 = U / 2.0
+                    physical_params = PhysicalParams(U=U, mu_0=mu_0, V=V, t=t)
+                    run_config = ClusterModelConfig(
+                        L=L,
+                        int_cluster_size=Nc,
+                        cluster_separation_ratio=int_sep_ratio,
+                        V_separation_ratio=v_sep_ratio,
+                        ham_lib='quspin',
+                        physical_params=physical_params,
+                        model_bc='periodic',
+                        int_cluster_bc='periodic',
+                        super_cluster_bc='periodic',
+                        solver_method=solver_method,
+                        states_retained=states_retained,
+                    )
+                    try:
+                        system_expectations, _ = get_general_expectations(run_config)
+                        energy, filling, _ = system_expectations
+                        energy_subtracted = (energy + mu_0 * filling) / L
+                        cluster_results[(Nc, V)][u_idx] = energy_subtracted
+                    except Exception as exc:
+                        failed_calculations.append({
+                            'method': f'cluster Nc={Nc}',
+                            'params': {'U': U, 'V': V},
+                            'error': str(exc),
+                        })
+
+    n_cols = min(3, len(u_list))
+    n_rows = int(np.ceil(len(u_list) / n_cols))
+    subplot_titles = [
+        f"U = {u_list[idx]:.3g}" if idx < len(u_list) else ""
+        for idx in range(n_rows * n_cols)
+    ]
+    fig = make_subplots(
+        rows=n_rows,
+        cols=n_cols,
+        subplot_titles=subplot_titles,
+        horizontal_spacing=0.08,
+        vertical_spacing=0.12,
+    )
+
+    color_palette = [
+        '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728',
+        '#9467bd', '#8c564b', '#e377c2', '#7f7f7f',
+        '#bcbd22', '#17becf',
+    ]
+    color_map = {
+        V: color_palette[idx % len(color_palette)]
+        for idx, V in enumerate(v_list)
+    }
+
+    any_trace = False
+    subplot_annotations: List[Dict] = []
+    for u_idx, U in enumerate(u_list):
+        row = (u_idx // n_cols) + 1
+        col = (u_idx % n_cols) + 1
+        for v_idx, V in enumerate(v_list):
+            dmrg_energy = dmrg_cache[u_idx, v_idx]
+            if not np.isfinite(dmrg_energy):
+                continue
+
+            xs = []
+            ys = []
+            hover_text = []
+            for Nc in cluster_sizes:
+                cluster_energy = cluster_results[(Nc, V)][u_idx]
+                if not np.isfinite(cluster_energy):
+                    continue
+                denom = np.abs(dmrg_energy)
+                if denom < 1e-12:
+                    denom = 1e-12
+                rel_err = np.abs(dmrg_energy - cluster_energy) / denom
+                xs.append(Nc)
+                ys.append(rel_err)
+                hover_text.append(
+                    f"U={U:.3g}<br>V={V:.3g}<br>Nc={Nc}<br>"
+                    f"E_cluster={cluster_energy:.6f}<br>E_DMRG={dmrg_energy:.6f}"
+                )
+
+            if not xs:
+                continue
+
+            fig.add_trace(
+                go.Scatter(
+                    x=xs,
+                    y=ys,
+                    mode='lines+markers',
+                    name=f"V={V:.3g}",
+                    legendgroup=f"V={V:.3g}",
+                    marker=dict(color=color_map[V], size=8),
+                    line=dict(color=color_map[V], width=2),
+                    showlegend=(u_idx == 0),
+                    hovertemplate="%{text}<br>|ΔE|/|E|=%{y:.3e}<extra></extra>",
+                    text=hover_text,
+                ),
+                row=row,
+                col=col,
+            )
+            any_trace = True
+
+        fig.update_xaxes(title_text="Cluster size (N_c)", row=row, col=col)
+        fig.update_yaxes(
+            title_text="|E_DMRG - E_cluster| / |E_DMRG|",
+            row=row,
+            col=col,
+            type='log' if log_yaxis else 'linear',
+            tickformat='.2%'
+        )
+
+        x_center = (col - 0.5) / n_cols
+        y_top = 1 - (row - 1) / n_rows
+        subplot_annotations.append(
+            dict(
+                text=f"U = {U:.3g}",
+                x=x_center,
+                xref='paper',
+                y=y_top - 0.06,
+                yref='paper',
+                showarrow=False,
+                font=dict(size=12, color='black')
+            )
+        )
+
+    if not any_trace:
+        raise RuntimeError("No valid data points available to plot cluster-size convergence.")
+
+    v_sep_label = format_sep_as_pi(v_sep_ratio)
+    annotation_text = (
+        f"v_sep={v_sep_label}, t={t}, L={L}, chi={chi}, states={states_retained}"
+    )
+
+    fig.update_layout(
+        title=dict(text="Relative energy error vs cluster size", x=0.5, xanchor='center'),
+        hovermode='closest',
+        legend_title="V values",
+        annotations=subplot_annotations + [
+            dict(
+                text=annotation_text,
+                x=0.5,
+                xref='paper',
+                y=1.06,
+                yref='paper',
+                showarrow=False,
+                font=dict(size=12, color='gray'),
+            )
+        ],
+    )
+
+    os.makedirs(output_dir, exist_ok=True)
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    saved_paths = {}
+
+    if save_html:
+        html_name = f"{filename_prefix}_L{L}_chi{chi}_{timestamp}.html"
+        html_path = os.path.join(output_dir, html_name)
+        fig.write_html(html_path)
+        saved_paths['html'] = html_path
+        print(f"Saved figure to {html_path}")
+
+    cluster_energy_serialized = {
+        Nc: {V: cluster_results[(Nc, V)].tolist() for V in v_list}
+        for Nc in cluster_sizes
+    }
+    results_payload = {
+        'cluster_sizes': cluster_sizes,
+        'U_values': u_list,
+        'V_values': v_list,
+        'cluster_energies': cluster_energy_serialized,
+        'dmrg_energies': dmrg_cache.tolist(),
+        'int_sep_ratios': {Nc: ratio_map[Nc] for Nc in cluster_sizes},
+        'parameters': {
+            'v_sep_ratio': v_sep_ratio,
+            't': t,
+            'L': L,
+            'chi': chi,
+            'solver_method': solver_method,
+            'states_retained': states_retained,
+            'reference_scheme': reference_scheme,
+        },
+        'artifacts': saved_paths,
+        'failures': failed_calculations,
+    }
+
+    if save_pickle:
+        pickle_name = f"{filename_prefix}_L{L}_chi{chi}_{timestamp}.pkl"
+        pickle_path = os.path.join(output_dir, pickle_name)
+        with open(pickle_path, 'wb') as fh:
+            pickle.dump(results_payload, fh)
+        saved_paths['pickle'] = pickle_path
+        print(f"Saved data to {pickle_path}")
+
+    if failed_calculations:
+        print("\n" + "=" * 60)
+        print("WARNING: Some calculations failed")
+        print("=" * 60)
+        for failure in failed_calculations:
+            params_desc = ', '.join(f"{k}={v}" for k, v in failure['params'].items())
+            print(f"{failure['method']}: {params_desc}")
+            print(f"  Error: {failure['error'].splitlines()[0]}")
+
+    if show_plots:
+        fig.show()
+
+    return fig, results_payload
+
+
 if __name__ == "__main__":
     # Example usage
     L = 12
@@ -652,3 +1076,487 @@ if __name__ == "__main__":
         chi=32,
         show_plots=True
     )
+
+
+def compare_U_values_with_dmrg(
+    v_sep_ratio: Tuple[int, int],
+    int_sep_ratios: Union[Tuple[int, int], Dict[int, Tuple[int, int]]],
+    cluster_sizes: Sequence[int],
+    U_values: Sequence[float],
+    V_values: Sequence[float],
+    *,
+    t: float = 1.0,
+    L: int = 20,
+    chi: int = 32,
+    solver_method: str = 'dense_ED',
+    states_retained: int = 4,
+    output_dir: str = 'large_files/plots',
+    show_plots: bool = True,
+    save_html: bool = True,
+    save_data: bool = True,
+    filename_prefix: str = 'U_value_energy_comparison',
+    log_yaxis: bool = True,
+    include_idmrg: bool = True,
+    include_finite_dmrg: bool = True,
+    results: Optional[Union[Dict, str, os.PathLike]] = None,
+) -> Tuple[go.Figure, Dict]:
+    """
+    Plot how the cluster method converges to DMRG as the cluster size (N_c) increases.
+    
+    This function is similar to compare_cluster_sizes_with_dmrg but swaps the axes:
+    - Subplots: Different V values
+    - X-axis: U values
+    - Lines: Different cluster sizes (N_c)
+    - Y-axis: Ground state energy per site
+
+    Args:
+        v_sep_ratio: Ratio controlling the AA modulation for V.
+        int_sep_ratios: Either a single (p, q) tuple applied to every cluster
+            size or a dict mapping each N_c to its specific interaction
+            separation ratio.
+        cluster_sizes: Iterable of cluster sizes (N_c) to test.
+        U_values: Iterable of U values; each becomes a point on the x-axis.
+        V_values: Iterable of V strengths; each becomes a separate subplot.
+        t: Hopping parameter.
+        L: System size used for the cluster method.
+        chi: Bond dimension for iDMRG.
+        solver_method: Diagonalisation backend for the cluster Hamiltonian.
+        states_retained: Number of states retained in the cluster solver.
+        output_dir: Directory for saved artifacts.
+        show_plots: Whether to open the generated Plotly figure.
+        save_html: If True, save the interactive figure as HTML.
+        save_data: If True, pickle the raw numerical results.
+        filename_prefix: Prefix for saved artifact names.
+        log_yaxis: Plot the y-axis on a log scale (not used for energy plots).
+        include_idmrg: Whether to include iDMRG reference calculations.
+        include_finite_dmrg: Whether to include finite DMRG reference calculations.
+
+    Returns:
+        (figure, results_dict)
+    """
+
+    if t is None:
+        raise ValueError("Parameter t must be specified for the cluster calculations.")
+
+    def _coerce_ratio(value, label: str) -> Tuple[int, int]:
+        if value is None:
+            raise ValueError(f"{label} ratio must be provided.")
+        if isinstance(value, np.ndarray):
+            value = value.tolist()
+        if not isinstance(value, (list, tuple)) or len(value) != 2:
+            raise ValueError(f"{label} ratio must be a length-2 iterable, got {value!r}.")
+        try:
+            p = int(round(value[0]))
+            q = int(round(value[1]))
+        except Exception as exc:
+            raise ValueError(f"Could not parse {label} ratio {value!r} into integers.") from exc
+        if q == 0:
+            raise ValueError(f"Denominator for {label} ratio cannot be zero.")
+        return (p, q)
+
+    cluster_sizes = sorted({int(size) for size in cluster_sizes})
+    if not cluster_sizes:
+        raise ValueError("Provide at least one cluster size (N_c).")
+
+    U_values = np.asarray(U_values, dtype=float)
+    V_values = np.asarray(V_values, dtype=float)
+    if U_values.ndim != 1 or U_values.size == 0:
+        raise ValueError("U_values must be a 1-D array with at least one entry.")
+    if V_values.ndim != 1 or V_values.size == 0:
+        raise ValueError("V_values must be a 1-D array with at least one entry.")
+
+    u_list = [float(u) for u in U_values]
+    v_list = [float(v) for v in V_values]
+
+    v_sep_ratio = _coerce_ratio(v_sep_ratio, "V separation")
+
+    if isinstance(int_sep_ratios, dict):
+        ratio_map: Dict[int, Tuple[int, int]] = {}
+        for Nc in cluster_sizes:
+            if Nc not in int_sep_ratios:
+                raise ValueError(f"No int_sep ratio provided for cluster size Nc={Nc}.")
+            ratio_map[Nc] = _coerce_ratio(int_sep_ratios[Nc], f"int_sep (Nc={Nc})")
+    else:
+        common_ratio = _coerce_ratio(int_sep_ratios, "int_sep")
+        ratio_map = {Nc: common_ratio for Nc in cluster_sizes}
+
+    cluster_results: Dict[Tuple[int, float], np.ndarray]
+    idmrg_cache: np.ndarray
+    finite_dmrg_cache: np.ndarray
+    failed_calculations: List[Dict] = []
+
+    if results is not None:
+        if isinstance(results, (str, os.PathLike)):
+            results_path = Path(results)
+            if not results_path.exists():
+                raise ValueError(f"Results file not found: {results_path}")
+            with open(results_path, 'rb') as fh:
+                results = pickle.load(fh)
+        elif not isinstance(results, dict):
+            raise ValueError("results must be a dict or path-like object when provided.")
+
+        save_data = False  # Avoid re-saving when plotting from cached data
+        print("Using precomputed results payload; skipping new simulations.")
+        params = results.get('parameters', {})
+        
+        # Load caches if available, otherwise fill with NaN
+        idmrg_cache = np.asarray(results.get('idmrg_energies', []), dtype=float)
+        if idmrg_cache.size == 0:
+             idmrg_cache = np.full((len(u_list), len(v_list)), np.nan, dtype=float)
+             
+        finite_dmrg_cache = np.asarray(results.get('finite_dmrg_energies', []), dtype=float)
+        if finite_dmrg_cache.size == 0:
+             finite_dmrg_cache = np.full((len(u_list), len(v_list)), np.nan, dtype=float)
+
+        serialized_clusters = results.get('cluster_energies', {})
+        cluster_results = {}
+
+        for Nc in cluster_sizes:
+            cluster_by_v = serialized_clusters.get(str(Nc)) or serialized_clusters.get(Nc)
+            if cluster_by_v is None:
+                raise ValueError(f"Results payload missing data for cluster size Nc={Nc}.")
+            for V in v_list:
+                series = cluster_by_v.get(str(V)) or cluster_by_v.get(V)
+                if series is None:
+                    raise ValueError(f"Results payload missing data for V={V} at Nc={Nc}.")
+                arr = np.asarray(series, dtype=float)
+                if arr.size != len(u_list):
+                    raise ValueError(f"Cluster series for Nc={Nc}, V={V} has length {arr.size}, expected {len(u_list)}.")
+                cluster_results[(Nc, V)] = arr
+
+        # Override metadata from results where available
+        stored_ratio_map = results.get('int_sep_ratios')
+        if stored_ratio_map:
+            converted_ratio_map = {}
+            for key, val in stored_ratio_map.items():
+                try:
+                    Nc_key = int(key)
+                except (TypeError, ValueError):
+                    Nc_key = key
+                converted_ratio_map[Nc_key] = _coerce_ratio(val, f"int_sep (Nc={Nc_key})")
+            ratio_map = converted_ratio_map
+        params_v_sep = results.get('parameters', {}).get('v_sep_ratio', v_sep_ratio)
+        v_sep_ratio = _coerce_ratio(params_v_sep, "V separation")
+        t = params.get('t', t)
+        L = params.get('L', L)
+        chi = params.get('chi', chi)
+        states_retained = params.get('states_retained', states_retained)
+        include_idmrg = params.get('include_idmrg', include_idmrg)
+        include_finite_dmrg = params.get('include_finite_dmrg', include_finite_dmrg)
+    else:
+        # Storage for computed energies
+        cluster_results = {
+            (Nc, V): np.full(len(u_list), np.nan, dtype=float)
+            for Nc in cluster_sizes
+            for V in v_list
+        }
+        idmrg_cache = np.full((len(u_list), len(v_list)), np.nan, dtype=float)
+        finite_dmrg_cache = np.full((len(u_list), len(v_list)), np.nan, dtype=float)
+
+        print("=" * 60)
+        print("Computing reference energies")
+        print("=" * 60)
+        
+        for u_idx, U in enumerate(u_list):
+            mu_0 = U / 2.0
+            for v_idx, V in enumerate(v_list):
+                # iDMRG
+                if include_idmrg:
+                    try:
+                        energy_dmrg, filling_dmrg, _ = run_dmrg_method(
+                            U=U,
+                            mu_0=mu_0,
+                            V=V,
+                            V_sep=v_sep_ratio,
+                            t=t,
+                            system_size=L,
+                            chi=chi,
+                        )
+                        dmrg_value = energy_dmrg + mu_0 * filling_dmrg
+                        idmrg_cache[u_idx, v_idx] = dmrg_value
+                    except Exception as exc:
+                        failed_calculations.append({
+                            'method': 'iDMRG',
+                            'params': {'U': U, 'V': V},
+                            'error': str(exc),
+                        })
+                
+                # Finite DMRG
+                if include_finite_dmrg:
+                    try:
+                        energy_finite, _, filling_finite = get_gnd(
+                            L=L,
+                            chi=chi,
+                            U=U,
+                            t=t,
+                            mu=mu_0,
+                            V=V,
+                            V_sep=v_sep_ratio,
+                        )
+                        energy_finite_per_site = energy_finite / L
+                        dmrg_value = energy_finite_per_site + mu_0 * filling_finite
+                        finite_dmrg_cache[u_idx, v_idx] = dmrg_value
+                    except Exception as exc:
+                        failed_calculations.append({
+                            'method': 'Finite DMRG',
+                            'params': {'U': U, 'V': V},
+                            'error': str(exc),
+                        })
+
+        print("\n")
+        print("=" * 60)
+        print("Running cluster calculations for each N_c")
+        print("=" * 60)
+        for Nc in tqdm(cluster_sizes, desc="Cluster sizes", ncols=80):
+            int_sep_ratio = ratio_map[Nc]
+            for v_idx, V in enumerate(v_list):
+                for u_idx, U in enumerate(u_list):
+                    mu_0 = U / 2.0
+                    physical_params = PhysicalParams(U=U, mu_0=mu_0, V=V, t=t)
+                    run_config = ClusterModelConfig(
+                        L=L,
+                        int_cluster_size=Nc,
+                        cluster_separation_ratio=int_sep_ratio,
+                        V_separation_ratio=v_sep_ratio,
+                        ham_lib='quspin',
+                        physical_params=physical_params,
+                        model_bc='periodic',
+                        int_cluster_bc='periodic',
+                        super_cluster_bc='periodic',
+                        solver_method=solver_method,
+                        states_retained=states_retained,
+                    )
+                    try:
+                        system_expectations, _ = get_general_expectations(run_config)
+                        energy, filling, _ = system_expectations
+                        energy_subtracted = (energy + mu_0 * filling) / L
+                        cluster_results[(Nc, V)][u_idx] = energy_subtracted
+                    except Exception as exc:
+                        failed_calculations.append({
+                            'method': f'cluster Nc={Nc}',
+                            'params': {'U': U, 'V': V},
+                            'error': str(exc),
+                        })
+
+    # --- PLOTTING LOGIC ---
+    # Subplots are V values
+    n_cols = min(3, len(v_list))
+    n_rows = int(np.ceil(len(v_list) / n_cols))
+    subplot_titles = [
+        f"V = {v_list[idx]:.3g}" if idx < len(v_list) else ""
+        for idx in range(n_rows * n_cols)
+    ]
+    fig = make_subplots(
+        rows=n_rows,
+        cols=n_cols,
+        subplot_titles=subplot_titles,
+        horizontal_spacing=0.08,
+        vertical_spacing=0.12,
+    )
+
+    color_palette = [
+        '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728',
+        '#9467bd', '#8c564b', '#e377c2', '#7f7f7f',
+        '#bcbd22', '#17becf',
+    ]
+    # Color map for cluster sizes now
+    color_map = {
+        Nc: color_palette[idx % len(color_palette)]
+        for idx, Nc in enumerate(cluster_sizes)
+    }
+
+    any_trace = False
+    subplot_annotations: List[Dict] = []
+    
+    for v_idx, V in enumerate(v_list):
+        row = (v_idx // n_cols) + 1
+        col = (v_idx % n_cols) + 1
+        
+        # Plot iDMRG reference if available
+        idmrg_energies = idmrg_cache[:, v_idx]
+        if np.any(np.isfinite(idmrg_energies)):
+            fig.add_trace(
+                go.Scatter(
+                    x=u_list,
+                    y=idmrg_energies,
+                    mode='lines+markers',
+                    name="iDMRG",
+                    legendgroup="iDMRG",
+                    marker=dict(color='black', size=6, symbol='x'),
+                    line=dict(color='black', width=2, dash='dash'),
+                    showlegend=(v_idx == 0),
+                    hovertemplate="U=%{x:.3g}<br>E_iDMRG=%{y:.6f}<extra></extra>",
+                ),
+                row=row,
+                col=col,
+            )
+            any_trace = True
+            
+        # Plot Finite DMRG reference if available
+        finite_dmrg_energies = finite_dmrg_cache[:, v_idx]
+        if np.any(np.isfinite(finite_dmrg_energies)):
+            fig.add_trace(
+                go.Scatter(
+                    x=u_list,
+                    y=finite_dmrg_energies,
+                    mode='lines+markers',
+                    name="Finite DMRG",
+                    legendgroup="Finite DMRG",
+                    marker=dict(color='gray', size=6, symbol='cross'),
+                    line=dict(color='gray', width=2, dash='dot'),
+                    showlegend=(v_idx == 0),
+                    hovertemplate="U=%{x:.3g}<br>E_Finite=%{y:.6f}<extra></extra>",
+                ),
+                row=row,
+                col=col,
+            )
+            any_trace = True
+
+        for Nc in cluster_sizes:
+            # Get data for this V and Nc across all U
+            cluster_energies = cluster_results[(Nc, V)] # Array of length len(u_list)
+            
+            xs = []
+            ys = []
+            hover_text = []
+            
+            for u_idx, U in enumerate(u_list):
+                c_en = cluster_energies[u_idx]
+                
+                if not np.isfinite(c_en):
+                    continue
+                    
+                xs.append(U)
+                ys.append(c_en)
+                hover_text.append(
+                    f"U={U:.3g}<br>V={V:.3g}<br>Nc={Nc}<br>"
+                    f"E_cluster={c_en:.6f}"
+                )
+            
+            if not xs:
+                continue
+
+            fig.add_trace(
+                go.Scatter(
+                    x=xs,
+                    y=ys,
+                    mode='lines+markers',
+                    name=f"Nc={Nc}",
+                    legendgroup=f"Nc={Nc}",
+                    marker=dict(color=color_map[Nc], size=8),
+                    line=dict(color=color_map[Nc], width=2),
+                    showlegend=(v_idx == 0),
+                    hovertemplate="%{text}<extra></extra>",
+                    text=hover_text,
+                ),
+                row=row,
+                col=col,
+            )
+            any_trace = True
+
+        fig.update_xaxes(title_text="U", row=row, col=col)
+        fig.update_yaxes(
+            title_text="Energy per site",
+            row=row,
+            col=col,
+            type='linear', # Always linear for energies
+            tickformat='.4f'
+        )
+
+        x_center = (col - 0.5) / n_cols
+        y_top = 1 - (row - 1) / n_rows
+        subplot_annotations.append(
+            dict(
+                text=f"V = {V:.3g}",
+                x=x_center,
+                xref='paper',
+                y=y_top - 0.06,
+                yref='paper',
+                showarrow=False,
+                font=dict(size=12, color='black')
+            )
+        )
+
+    if not any_trace:
+        raise RuntimeError("No valid data points available to plot U-value convergence.")
+
+    v_sep_label = format_sep_as_pi(v_sep_ratio)
+    annotation_text = (
+        f"v_sep={v_sep_label}, t={t}, L={L}, chi={chi}, states={states_retained}"
+    )
+
+    fig.update_layout(
+        title=dict(text="Ground State Energy vs U", x=0.5, xanchor='center'),
+        hovermode='closest',
+        legend_title="Method",
+        annotations=subplot_annotations + [
+            dict(
+                text=annotation_text,
+                x=0.5,
+                xref='paper',
+                y=1.06,
+                yref='paper',
+                showarrow=False,
+                font=dict(size=12, color='gray'),
+            )
+        ],
+    )
+
+    os.makedirs(output_dir, exist_ok=True)
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    saved_paths = {}
+
+    if save_html:
+        html_name = f"{filename_prefix}_L{L}_chi{chi}_{timestamp}.html"
+        html_path = os.path.join(output_dir, html_name)
+        fig.write_html(html_path)
+        saved_paths['html'] = html_path
+        print(f"Saved figure to {html_path}")
+
+    cluster_energy_serialized = {
+        Nc: {V: cluster_results[(Nc, V)].tolist() for V in v_list}
+        for Nc in cluster_sizes
+    }
+    results_payload = {
+        'cluster_sizes': cluster_sizes,
+        'U_values': u_list,
+        'V_values': v_list,
+        'cluster_energies': cluster_energy_serialized,
+        'idmrg_energies': idmrg_cache.tolist(),
+        'finite_dmrg_energies': finite_dmrg_cache.tolist(),
+        'int_sep_ratios': {Nc: ratio_map[Nc] for Nc in cluster_sizes},
+        'parameters': {
+            'v_sep_ratio': v_sep_ratio,
+            't': t,
+            'L': L,
+            'chi': chi,
+            'solver_method': solver_method,
+            'states_retained': states_retained,
+            'include_idmrg': include_idmrg,
+            'include_finite_dmrg': include_finite_dmrg,
+        },
+        'artifacts': saved_paths,
+        'failures': failed_calculations,
+    }
+
+    if save_data:
+        pickle_name = f"{filename_prefix}_L{L}_chi{chi}_{timestamp}.pkl"
+        pickle_path = os.path.join(output_dir, pickle_name)
+        with open(pickle_path, 'wb') as fh:
+            pickle.dump(results_payload, fh)
+        saved_paths['pickle'] = pickle_path
+        print(f"Saved data to {pickle_path}")
+
+    if failed_calculations:
+        print("\n" + "=" * 60)
+        print("WARNING: Some calculations failed")
+        print("=" * 60)
+        for failure in failed_calculations:
+            params_desc = ', '.join(f"{k}={v}" for k, v in failure['params'].items())
+            print(f"{failure['method']}: {params_desc}")
+            print(f"  Error: {failure['error'].splitlines()[0]}")
+
+    if show_plots:
+        fig.show()
+
+    return fig, results_payload
