@@ -3,16 +3,19 @@ Plotting functions for comparing different cluster model setups with iDMRG.
 """
 
 import numpy as np
+import time
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import plotly.io as pio
 from typing import Tuple, List, Dict, Optional, Sequence, Union
 import os
+import warnings
 import pickle
 from datetime import datetime
 from pathlib import Path
 
 from aah_code.cluster_model.model import ClusterModelConfig, PhysicalParams
+from aah_code.cluster_model.clustering import generate_clusters
 from aah_code.cluster_model.run_scripts_me import get_general_expectations
 from aah_code.real_space_dmrg import run_dmrg_method, get_gnd
 
@@ -24,6 +27,129 @@ try:
 except ImportError:
     def tqdm(iterable, desc=None):
         return iterable
+
+
+class TimingRecorder:
+    """Collects timing records when enabled."""
+    def __init__(self):
+        self.records: List[Dict] = []
+
+    def record(self, **kwargs):
+        self.records.append(kwargs)
+
+
+def time_call(recorder: Optional[TimingRecorder], meta: Dict, func, *args, **kwargs):
+    """Run func(*args, **kwargs), recording elapsed time into recorder if provided."""
+    if recorder is None:
+        return func(*args, **kwargs)
+    start = time.perf_counter()
+    result = func(*args, **kwargs)
+    elapsed = time.perf_counter() - start
+    meta = dict(meta)
+    meta["elapsed_sec"] = elapsed
+    recorder.record(**meta)
+    return result
+
+
+def supercluster_size_from_clusters(clusters: np.ndarray) -> Optional[int]:
+    """
+    Infer total supercluster size from a clusters array.
+
+    Expected shapes often look like [num_super, n, Nc, ...], so we take the
+    product of the second and third dimensions when available. If deeper dims
+    are present, include them; if only [num_super, n], fall back to n.
+    """
+    try:
+        if clusters.ndim >= 3:
+            return int(np.prod(clusters.shape[1:3]))
+        elif clusters.ndim >= 2:
+            return int(clusters.shape[1])
+    except Exception:
+        return None
+    return None
+
+
+def plot_timings(
+    timings: List[Dict],
+    output_dir: str = 'large_files/plots',
+    filename_prefix: str = 'timing_summary',
+    show_plots: bool = True,
+):
+    """
+    Plot average runtime per supercluster size (or Nc fallback) with min/max error bars.
+    """
+    if not timings:
+        raise ValueError("No timing records provided.")
+
+    # Aggregate by method and supercluster size (fallback to Nc)
+    agg: Dict[Tuple[str, float], List[float]] = {}
+    for rec in timings:
+        method = rec.get("method", "unknown")
+        sc_size = rec.get("super_cluster_size")
+        if sc_size is None:
+            sc_size = rec.get("Nc", np.nan)
+        try:
+            sc_size = float(sc_size)
+        except Exception:
+            sc_size = np.nan
+        key = (method, sc_size)
+        agg.setdefault(key, []).append(float(rec.get("elapsed_sec", np.nan)))
+
+    method_groups: Dict[str, Dict[str, List[float]]] = {}
+    for (method, sc_size), vals in agg.items():
+        vals = [v for v in vals if np.isfinite(v)]
+        if not vals or not np.isfinite(sc_size):
+            continue
+        method_groups.setdefault(method, {"x": [], "mean": [], "err_up": [], "err_down": []})
+        mean = float(np.mean(vals))
+        vmax = float(np.max(vals))
+        vmin = float(np.min(vals))
+        method_groups[method]["x"].append(sc_size)
+        method_groups[method]["mean"].append(mean)
+        method_groups[method]["err_up"].append(vmax - mean)
+        method_groups[method]["err_down"].append(mean - vmin)
+
+    fig = go.Figure()
+    for method, data in method_groups.items():
+        # sort by x
+        order = np.argsort(data["x"])
+        x = [data["x"][i] for i in order]
+        y = [data["mean"][i] for i in order]
+        err_up = [data["err_up"][i] for i in order]
+        err_down = [data["err_down"][i] for i in order]
+        fig.add_trace(
+            go.Scatter(
+                x=x,
+                y=y,
+                mode='lines+markers',
+                name=method,
+                error_y=dict(
+                    type='data',
+                    array=err_up,
+                    arrayminus=err_down,
+                    visible=True,
+                ),
+                hovertemplate="Supercluster=%{x}<br>mean=%{y:.4f}s<br>+%{error_y.array:.4f}/-%{error_y.arrayminus:.4f}<extra></extra>",
+            )
+        )
+
+    fig.update_layout(
+        title="Runtime per supercluster size",
+        xaxis_title="Supercluster size (sites)",
+        yaxis_title="Elapsed time (s)",
+        hovermode="x unified",
+    )
+
+    os.makedirs(output_dir, exist_ok=True)
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    filename = f"{filename_prefix}_{timestamp}.html"
+    filepath = os.path.join(output_dir, filename)
+    fig.write_html(filepath)
+
+    if show_plots:
+        fig.show()
+
+    return fig, {"html": filepath}
 
 
 def format_sep_as_pi(sep_tuple: Tuple[int, int]) -> str:
@@ -61,7 +187,9 @@ def compare_int_seps_with_dmrg(
     show_plots: bool = True,
     save_pickle: bool = True,
     include_idmrg: bool = True,
-    include_finite_dmrg: bool = False
+    include_finite_dmrg: bool = False,
+    include_timing: bool = False,
+    include_timing_plot: bool = False,
 ):
     """
     Compare different int_sep setups with iDMRG for a fixed v_sep.
@@ -96,6 +224,7 @@ def compare_int_seps_with_dmrg(
         figures: List of plotly figures
         all_results: Dictionary with all computed results
     """
+    timing_recorder = TimingRecorder() if include_timing else None
     
     # Handle parameter input modes
     if x_axis is not None and varying_parameter is not None and fixed_parameter is not None:
@@ -179,23 +308,36 @@ def compare_int_seps_with_dmrg(
             mu_0 = U / 2  # Half-filling
             
             # Infinite DMRG calculation
-            if include_idmrg:
-                try:
-                    # iDMRG calculation (same for all int_sep, only depends on v_sep)
-                    energy_idmrg, filling_idmrg, _ = run_dmrg_method(U, mu_0, V, v_sep_ratio, t, L, chi)
-                    energy_idmrg_subtracted = energy_idmrg + mu_0 * filling_idmrg
+        if include_idmrg:
+            try:
+                # iDMRG calculation (same for all int_sep, only depends on v_sep)
+                meta = {
+                    "method": "iDMRG",
+                    "U": U,
+                    "V": V,
+                    "t": t,
+                    "L": L,
+                    "Nc": Nc,
+                    "int_sep": None,
+                    "v_sep": v_sep_ratio,
+                    "super_cluster_size": None,
+                }
+                energy_idmrg, filling_idmrg, _ = time_call(
+                    timing_recorder, meta, run_dmrg_method, U, mu_0, V, v_sep_ratio, t, L, chi
+                )
+                energy_idmrg_subtracted = energy_idmrg + mu_0 * filling_idmrg
                     
-                    all_results[vary_val]['energies_idmrg'].append(energy_idmrg_subtracted)
-                    all_results[vary_val]['fillings_idmrg'].append(filling_idmrg)
-                except Exception as e:
-                    # If iDMRG fails, append NaN and record the failure
-                    all_results[vary_val]['energies_idmrg'].append(np.nan)
-                    all_results[vary_val]['fillings_idmrg'].append(np.nan)
-                    failed_calculations.append({
-                        'method': 'iDMRG',
-                        'params': {x_param_name: x_val, varying_param_name: vary_val, fixed_param_name: fixed_value},
-                        'error': str(e)
-                    })
+                all_results[vary_val]['energies_idmrg'].append(energy_idmrg_subtracted)
+                all_results[vary_val]['fillings_idmrg'].append(filling_idmrg)
+            except Exception as e:
+                # If iDMRG fails, append NaN and record the failure
+                all_results[vary_val]['energies_idmrg'].append(np.nan)
+                all_results[vary_val]['fillings_idmrg'].append(np.nan)
+                failed_calculations.append({
+                    'method': 'iDMRG',
+                    'params': {x_param_name: x_val, varying_param_name: vary_val, fixed_param_name: fixed_value},
+                    'error': str(e)
+                })
             else:
                 # If not including iDMRG, just append NaN
                 all_results[vary_val]['energies_idmrg'].append(np.nan)
@@ -205,7 +347,20 @@ def compare_int_seps_with_dmrg(
             if include_finite_dmrg:
                 try:
                     # Finite DMRG calculation (with actual system size L)
-                    energy_finite, _, filling_finite = get_gnd(L, chi, U, t, mu_0, V, v_sep_ratio)
+                    meta = {
+                        "method": "DMRG",
+                        "U": U,
+                        "V": V,
+                        "t": t,
+                        "L": L,
+                        "Nc": Nc,
+                        "int_sep": None,
+                        "v_sep": v_sep_ratio,
+                        "super_cluster_size": None,
+                    }
+                    energy_finite, _, filling_finite = time_call(
+                        timing_recorder, meta, get_gnd, L, chi, U, t, mu_0, V, v_sep_ratio
+                    )
                     energy_finite_per_site = energy_finite / L
                     # filling_finite is already per-site from get_gnd
                     energy_finite_subtracted = energy_finite_per_site + mu_0 * filling_finite
@@ -241,8 +396,25 @@ def compare_int_seps_with_dmrg(
                         solver_method=solver_method,
                         states_retained=states_retained
                     )
-                    
-                    system_expectations, _ = get_general_expectations(run_config)
+                    super_cluster_size = None
+                    if timing_recorder is not None:
+                        try:
+                            clusters_tmp = generate_clusters(L, Nc, int_sep, v_sep_ratio)
+                            super_cluster_size = supercluster_size_from_clusters(clusters_tmp)
+                        except Exception:
+                            super_cluster_size = None
+                    meta = {
+                        "method": "cluster_ED",
+                        "U": U,
+                        "V": V,
+                        "t": t,
+                        "L": L,
+                        "Nc": Nc,
+                        "int_sep": int_sep,
+                        "v_sep": v_sep_ratio,
+                        "super_cluster_size": super_cluster_size,
+                    }
+                    system_expectations, _ = time_call(timing_recorder, meta, get_general_expectations, run_config, timing_recorder=timing_recorder)
                     energy, filling, _ = system_expectations
                     print(f"Raw Energy: {energy}, raw Filling: {filling}")
                     energy_subtracted = (energy + mu_0 * filling) / L
@@ -380,6 +552,17 @@ def compare_int_seps_with_dmrg(
         print(f"\nTotal failed calculations: {len(failed_calculations)}")
         print("Note: Failed points are marked as NaN in the results and excluded from plots")
     
+    if include_timing and timing_recorder is not None:
+        all_results['_timings'] = timing_recorder.records
+        if include_timing_plot and timing_recorder.records:
+            fig_timing, timing_artifacts = plot_timings(
+                timing_recorder.records,
+                output_dir=output_dir,
+                filename_prefix="timing_int_seps",
+                show_plots=show_plots,
+            )
+            all_results['_timing_plot'] = timing_artifacts
+
     return figures, all_results
 
 
@@ -654,6 +837,8 @@ def compare_cluster_sizes_with_dmrg(
     log_yaxis: bool = True,
     reference_scheme: str = 'idmrg',
     results: Optional[Union[Dict, str, os.PathLike]] = None,
+    include_timing: bool = False,
+    include_timing_plot: bool = False,
 ) -> Tuple[go.Figure, Dict]:
     """
     Plot how the cluster method converges to iDMRG as the cluster size (N_c) increases.
@@ -730,10 +915,18 @@ def compare_cluster_sizes_with_dmrg(
 
     if isinstance(int_sep_ratios, dict):
         ratio_map: Dict[int, Tuple[int, int]] = {}
+        fallback_ratio: Optional[Tuple[int, int]] = None
+        for v in int_sep_ratios.values():
+            fallback_ratio = _coerce_ratio(v, "int_sep (fallback)")
+            break
         for Nc in cluster_sizes:
-            if Nc not in int_sep_ratios:
-                raise ValueError(f"No int_sep ratio provided for cluster size Nc={Nc}.")
-            ratio_map[Nc] = _coerce_ratio(int_sep_ratios[Nc], f"int_sep (Nc={Nc})")
+            if Nc in int_sep_ratios:
+                ratio_map[Nc] = _coerce_ratio(int_sep_ratios[Nc], f"int_sep (Nc={Nc})")
+            else:
+                if fallback_ratio is None:
+                    raise ValueError(f"No int_sep ratio provided for cluster size Nc={Nc}.")
+                warnings.warn(f"No int_sep ratio provided for Nc={Nc}; using fallback {fallback_ratio}.")
+                ratio_map[Nc] = fallback_ratio
     else:
         common_ratio = _coerce_ratio(int_sep_ratios, "int_sep")
         ratio_map = {Nc: common_ratio for Nc in cluster_sizes}
@@ -741,6 +934,7 @@ def compare_cluster_sizes_with_dmrg(
     cluster_results: Dict[Tuple[int, float], np.ndarray]
     dmrg_cache: np.ndarray
     failed_calculations: List[Dict] = []
+    timing_recorder = TimingRecorder() if include_timing else None
 
     if results is not None:
         if isinstance(results, (str, os.PathLike)):
@@ -811,25 +1005,53 @@ def compare_cluster_sizes_with_dmrg(
             for v_idx, V in enumerate(v_list):
                 try:
                     if reference_scheme == 'idmrg':
-                        energy_dmrg, filling_dmrg, _ = run_dmrg_method(
-                            U=U,
-                            mu_0=mu_0,
-                            V=V,
-                            V_sep=v_sep_ratio,
-                            t=t,
-                            system_size=L,
-                            chi=chi,
+                        meta = {
+                            "method": "iDMRG",
+                            "U": U,
+                            "V": V,
+                            "t": t,
+                            "L": L,
+                            "Nc": None,
+                            "int_sep": None,
+                            "v_sep": v_sep_ratio,
+                            "super_cluster_size": None,
+                        }
+                        energy_dmrg, filling_dmrg, _ = time_call(
+                            timing_recorder,
+                            meta,
+                            run_dmrg_method,
+                            U,
+                            mu_0,
+                            V,
+                            v_sep_ratio,
+                            t,
+                            L,
+                            chi,
                         )
                         dmrg_value = energy_dmrg + mu_0 * filling_dmrg
                     else:
-                        energy_finite, _, filling_finite = get_gnd(
-                            L=L,
-                            chi=chi,
-                            U=U,
-                            t=t,
-                            mu=mu_0,
-                            V=V,
-                            V_sep=v_sep_ratio,
+                        meta = {
+                            "method": "DMRG",
+                            "U": U,
+                            "V": V,
+                            "t": t,
+                            "L": L,
+                            "Nc": None,
+                            "int_sep": None,
+                            "v_sep": v_sep_ratio,
+                            "super_cluster_size": None,
+                        }
+                        energy_finite, _, filling_finite = time_call(
+                            timing_recorder,
+                            meta,
+                            get_gnd,
+                            L,
+                            chi,
+                            U,
+                            t,
+                            mu_0,
+                            V,
+                            v_sep_ratio,
                         )
                         energy_finite_per_site = energy_finite / L
                         dmrg_value = energy_finite_per_site + mu_0 * filling_finite
@@ -848,6 +1070,13 @@ def compare_cluster_sizes_with_dmrg(
         print("=" * 60)
         for Nc in tqdm(cluster_sizes, desc="Cluster sizes", ncols=80):
             int_sep_ratio = ratio_map[Nc]
+            super_cluster_size = None
+            if timing_recorder is not None:
+                try:
+                    clusters_tmp = generate_clusters(L, Nc, int_sep_ratio, v_sep_ratio)
+                    super_cluster_size = supercluster_size_from_clusters(clusters_tmp)
+                except Exception:
+                    super_cluster_size = None
             for v_idx, V in enumerate(v_list):
                 for u_idx, U in enumerate(u_list):
                     mu_0 = U / 2.0
@@ -866,10 +1095,22 @@ def compare_cluster_sizes_with_dmrg(
                         states_retained=states_retained,
                     )
                     try:
-                        system_expectations, _ = get_general_expectations(run_config)
+                        meta = {
+                            "method": "cluster_ED",
+                            "U": U,
+                            "V": V,
+                            "t": t,
+                            "L": L,
+                            "Nc": Nc,
+                            "int_sep": int_sep_ratio,
+                            "v_sep": v_sep_ratio,
+                            "super_cluster_size": super_cluster_size,
+                        }
+                        system_expectations, _ = time_call(timing_recorder, meta, get_general_expectations, run_config, timing_recorder=timing_recorder)
                         energy, filling, _ = system_expectations
                         energy_subtracted = (energy + mu_0 * filling) / L
                         cluster_results[(Nc, V)][u_idx] = energy_subtracted
+                        cluster_fillings[(Nc, V)][u_idx] = filling / L
                     except Exception as exc:
                         failed_calculations.append({
                             'method': f'cluster Nc={Nc}',
@@ -1032,6 +1273,16 @@ def compare_cluster_sizes_with_dmrg(
         'artifacts': saved_paths,
         'failures': failed_calculations,
     }
+    if include_timing and timing_recorder is not None:
+        results_payload['timings'] = timing_recorder.records
+        if include_timing_plot and timing_recorder.records:
+            fig_timing, timing_artifacts = plot_timings(
+                timing_recorder.records,
+                output_dir=output_dir,
+                filename_prefix=f"{filename_prefix}_timing",
+                show_plots=show_plots,
+            )
+            saved_paths['timing_plot'] = timing_artifacts.get('html')
 
     if save_pickle:
         pickle_name = f"{filename_prefix}_L{L}_chi{chi}_{timestamp}.pkl"
@@ -1098,6 +1349,8 @@ def compare_U_values_with_dmrg(
     log_yaxis: bool = True,
     include_idmrg: bool = True,
     include_finite_dmrg: bool = True,
+    include_timing: bool = False,
+    include_timing_plot: bool = False,
     results: Optional[Union[Dict, str, os.PathLike]] = None,
 ) -> Tuple[go.Figure, Dict]:
     """
@@ -1181,9 +1434,13 @@ def compare_U_values_with_dmrg(
         ratio_map = {Nc: common_ratio for Nc in cluster_sizes}
 
     cluster_results: Dict[Tuple[int, float], np.ndarray]
+    cluster_fillings: Dict[Tuple[int, float], np.ndarray]
     idmrg_cache: np.ndarray
     finite_dmrg_cache: np.ndarray
+    idmrg_fill_cache: np.ndarray
+    finite_dmrg_fill_cache: np.ndarray
     failed_calculations: List[Dict] = []
+    timing_recorder = TimingRecorder() if include_timing else None
 
     if results is not None:
         if isinstance(results, (str, os.PathLike)):
@@ -1207,9 +1464,16 @@ def compare_U_values_with_dmrg(
         finite_dmrg_cache = np.asarray(results.get('finite_dmrg_energies', []), dtype=float)
         if finite_dmrg_cache.size == 0:
              finite_dmrg_cache = np.full((len(u_list), len(v_list)), np.nan, dtype=float)
+        idmrg_fill_cache = np.asarray(results.get('idmrg_fillings', []), dtype=float)
+        if idmrg_fill_cache.size == 0:
+             idmrg_fill_cache = np.full((len(u_list), len(v_list)), np.nan, dtype=float)
+        finite_dmrg_fill_cache = np.asarray(results.get('finite_dmrg_fillings', []), dtype=float)
+        if finite_dmrg_fill_cache.size == 0:
+             finite_dmrg_fill_cache = np.full((len(u_list), len(v_list)), np.nan, dtype=float)
 
         serialized_clusters = results.get('cluster_energies', {})
         cluster_results = {}
+        cluster_fillings = {}
 
         for Nc in cluster_sizes:
             cluster_by_v = serialized_clusters.get(str(Nc)) or serialized_clusters.get(Nc)
@@ -1223,6 +1487,20 @@ def compare_U_values_with_dmrg(
                 if arr.size != len(u_list):
                     raise ValueError(f"Cluster series for Nc={Nc}, V={V} has length {arr.size}, expected {len(u_list)}.")
                 cluster_results[(Nc, V)] = arr
+        # Optional: load fillings if present
+        serialized_fills = results.get('cluster_fillings', {})
+        for Nc in cluster_sizes:
+            cluster_by_v = serialized_fills.get(str(Nc)) or serialized_fills.get(Nc) or {}
+            for V in v_list:
+                series = cluster_by_v.get(str(V)) or cluster_by_v.get(V)
+                if series is None:
+                    cluster_fillings[(Nc, V)] = np.full(len(u_list), np.nan, dtype=float)
+                    continue
+                arr = np.asarray(series, dtype=float)
+                if arr.size != len(u_list):
+                    cluster_fillings[(Nc, V)] = np.full(len(u_list), np.nan, dtype=float)
+                else:
+                    cluster_fillings[(Nc, V)] = arr
 
         # Override metadata from results where available
         stored_ratio_map = results.get('int_sep_ratios')
@@ -1250,8 +1528,15 @@ def compare_U_values_with_dmrg(
             for Nc in cluster_sizes
             for V in v_list
         }
+        cluster_fillings = {
+            (Nc, V): np.full(len(u_list), np.nan, dtype=float)
+            for Nc in cluster_sizes
+            for V in v_list
+        }
         idmrg_cache = np.full((len(u_list), len(v_list)), np.nan, dtype=float)
         finite_dmrg_cache = np.full((len(u_list), len(v_list)), np.nan, dtype=float)
+        idmrg_fill_cache = np.full((len(u_list), len(v_list)), np.nan, dtype=float)
+        finite_dmrg_fill_cache = np.full((len(u_list), len(v_list)), np.nan, dtype=float)
 
         print("=" * 60)
         print("Computing reference energies")
@@ -1263,17 +1548,32 @@ def compare_U_values_with_dmrg(
                 # iDMRG
                 if include_idmrg:
                     try:
-                        energy_dmrg, filling_dmrg, _ = run_dmrg_method(
-                            U=U,
-                            mu_0=mu_0,
-                            V=V,
-                            V_sep=v_sep_ratio,
-                            t=t,
-                            system_size=L,
-                            chi=chi,
+                        meta = {
+                            "method": "iDMRG",
+                            "U": U,
+                            "V": V,
+                            "t": t,
+                            "L": L,
+                            "Nc": None,
+                            "int_sep": None,
+                            "v_sep": v_sep_ratio,
+                            "super_cluster_size": None,
+                        }
+                        energy_dmrg, filling_dmrg, _ = time_call(
+                            timing_recorder,
+                            meta,
+                            run_dmrg_method,
+                            U,
+                            mu_0,
+                            V,
+                            v_sep_ratio,
+                            t,
+                            L,
+                            chi,
                         )
                         dmrg_value = energy_dmrg + mu_0 * filling_dmrg
                         idmrg_cache[u_idx, v_idx] = dmrg_value
+                        idmrg_fill_cache[u_idx, v_idx] = filling_dmrg
                     except Exception as exc:
                         failed_calculations.append({
                             'method': 'iDMRG',
@@ -1284,18 +1584,33 @@ def compare_U_values_with_dmrg(
                 # Finite DMRG
                 if include_finite_dmrg:
                     try:
-                        energy_finite, _, filling_finite = get_gnd(
-                            L=L,
-                            chi=chi,
-                            U=U,
-                            t=t,
-                            mu=mu_0,
-                            V=V,
-                            V_sep=v_sep_ratio,
+                        meta = {
+                            "method": "DMRG",
+                            "U": U,
+                            "V": V,
+                            "t": t,
+                            "L": L,
+                            "Nc": None,
+                            "int_sep": None,
+                            "v_sep": v_sep_ratio,
+                            "super_cluster_size": None,
+                        }
+                        energy_finite, _, filling_finite = time_call(
+                            timing_recorder,
+                            meta,
+                            get_gnd,
+                            L,
+                            chi,
+                            U,
+                            t,
+                            mu_0,
+                            V,
+                            v_sep_ratio,
                         )
                         energy_finite_per_site = energy_finite / L
                         dmrg_value = energy_finite_per_site + mu_0 * filling_finite
                         finite_dmrg_cache[u_idx, v_idx] = dmrg_value
+                        finite_dmrg_fill_cache[u_idx, v_idx] = filling_finite
                     except Exception as exc:
                         failed_calculations.append({
                             'method': 'Finite DMRG',
@@ -1309,6 +1624,13 @@ def compare_U_values_with_dmrg(
         print("=" * 60)
         for Nc in tqdm(cluster_sizes, desc="Cluster sizes", ncols=80):
             int_sep_ratio = ratio_map[Nc]
+            super_cluster_size = None
+            if timing_recorder is not None:
+                try:
+                    clusters_tmp = generate_clusters(L, Nc, int_sep_ratio, v_sep_ratio)
+                    super_cluster_size = supercluster_size_from_clusters(clusters_tmp)
+                except Exception:
+                    super_cluster_size = None
             for v_idx, V in enumerate(v_list):
                 for u_idx, U in enumerate(u_list):
                     mu_0 = U / 2.0
@@ -1327,7 +1649,18 @@ def compare_U_values_with_dmrg(
                         states_retained=states_retained,
                     )
                     try:
-                        system_expectations, _ = get_general_expectations(run_config)
+                        meta = {
+                            "method": "cluster_ED",
+                            "U": U,
+                            "V": V,
+                            "t": t,
+                            "L": L,
+                            "Nc": Nc,
+                            "int_sep": int_sep_ratio,
+                            "v_sep": v_sep_ratio,
+                            "super_cluster_size": super_cluster_size,
+                        }
+                        system_expectations, _ = time_call(timing_recorder, meta, get_general_expectations, run_config, timing_recorder=timing_recorder)
                         energy, filling, _ = system_expectations
                         energy_subtracted = (energy + mu_0 * filling) / L
                         cluster_results[(Nc, V)][u_idx] = energy_subtracted
@@ -1339,13 +1672,21 @@ def compare_U_values_with_dmrg(
                         })
 
     # --- PLOTTING LOGIC ---
-    # Subplots are V values
+    # Subplots are V values; two rows per V (energy, filling)
     n_cols = min(3, len(v_list))
-    n_rows = int(np.ceil(len(v_list) / n_cols))
-    subplot_titles = [
-        f"V = {v_list[idx]:.3g}" if idx < len(v_list) else ""
-        for idx in range(n_rows * n_cols)
-    ]
+    n_rows_base = int(np.ceil(len(v_list) / n_cols))
+    n_rows = n_rows_base * 2
+    subplot_titles = []
+    for idx in range(n_rows_base * n_cols):
+        if idx < len(v_list):
+            subplot_titles.append(f"Energy: V = {v_list[idx]:.3g}")
+        else:
+            subplot_titles.append("")
+    for idx in range(n_rows_base * n_cols):
+        if idx < len(v_list):
+            subplot_titles.append(f"Filling: V = {v_list[idx]:.3g}")
+        else:
+            subplot_titles.append("")
     fig = make_subplots(
         rows=n_rows,
         cols=n_cols,
@@ -1369,8 +1710,9 @@ def compare_U_values_with_dmrg(
     subplot_annotations: List[Dict] = []
     
     for v_idx, V in enumerate(v_list):
-        row = (v_idx // n_cols) + 1
+        row_energy = (v_idx // n_cols) + 1
         col = (v_idx % n_cols) + 1
+        row_filling = row_energy + n_rows_base
         
         # Plot iDMRG reference if available
         idmrg_energies = idmrg_cache[:, v_idx]
@@ -1387,7 +1729,26 @@ def compare_U_values_with_dmrg(
                     showlegend=(v_idx == 0),
                     hovertemplate="U=%{x:.3g}<br>E_iDMRG=%{y:.6f}<extra></extra>",
                 ),
-                row=row,
+                row=row_energy,
+                col=col,
+            )
+            any_trace = True
+        # Filling iDMRG
+        idmrg_fills = idmrg_fill_cache[:, v_idx]
+        if np.any(np.isfinite(idmrg_fills)):
+            fig.add_trace(
+                go.Scatter(
+                    x=u_list,
+                    y=idmrg_fills,
+                    mode='lines+markers',
+                    name="iDMRG (fill)",
+                    legendgroup="iDMRG_fill",
+                    marker=dict(color='black', size=6, symbol='x'),
+                    line=dict(color='black', width=2, dash='dash'),
+                    showlegend=False,
+                    hovertemplate="U=%{x:.3g}<br>n_iDMRG=%{y:.6f}<extra></extra>",
+                ),
+                row=row_filling,
                 col=col,
             )
             any_trace = True
@@ -1407,7 +1768,25 @@ def compare_U_values_with_dmrg(
                     showlegend=(v_idx == 0),
                     hovertemplate="U=%{x:.3g}<br>E_Finite=%{y:.6f}<extra></extra>",
                 ),
-                row=row,
+                row=row_energy,
+                col=col,
+            )
+            any_trace = True
+        finite_dmrg_fills = finite_dmrg_fill_cache[:, v_idx]
+        if np.any(np.isfinite(finite_dmrg_fills)):
+            fig.add_trace(
+                go.Scatter(
+                    x=u_list,
+                    y=finite_dmrg_fills,
+                    mode='lines+markers',
+                    name="Finite DMRG (fill)",
+                    legendgroup="Finite DMRG fill",
+                    marker=dict(color='gray', size=6, symbol='cross'),
+                    line=dict(color='gray', width=2, dash='dot'),
+                    showlegend=False,
+                    hovertemplate="U=%{x:.3g}<br>n_Finite=%{y:.6f}<extra></extra>",
+                ),
+                row=row_filling,
                 col=col,
             )
             any_trace = True
@@ -1415,13 +1794,17 @@ def compare_U_values_with_dmrg(
         for Nc in cluster_sizes:
             # Get data for this V and Nc across all U
             cluster_energies = cluster_results[(Nc, V)] # Array of length len(u_list)
+            cluster_fills = cluster_fillings[(Nc, V)]
             
             xs = []
             ys = []
             hover_text = []
+            xs_fill = []
+            ys_fill = []
             
             for u_idx, U in enumerate(u_list):
                 c_en = cluster_energies[u_idx]
+                c_fill = cluster_fills[u_idx]
                 
                 if not np.isfinite(c_en):
                     continue
@@ -1432,6 +1815,9 @@ def compare_U_values_with_dmrg(
                     f"U={U:.3g}<br>V={V:.3g}<br>Nc={Nc}<br>"
                     f"E_cluster={c_en:.6f}"
                 )
+                if np.isfinite(c_fill):
+                    xs_fill.append(U)
+                    ys_fill.append(c_fill)
             
             if not xs:
                 continue
@@ -1449,22 +1835,47 @@ def compare_U_values_with_dmrg(
                     hovertemplate="%{text}<extra></extra>",
                     text=hover_text,
                 ),
-                row=row,
+                row=row_energy,
                 col=col,
             )
             any_trace = True
+            if xs_fill:
+                fig.add_trace(
+                    go.Scatter(
+                        x=xs_fill,
+                        y=ys_fill,
+                        mode='lines+markers',
+                        name=f"Nc={Nc} (fill)",
+                        legendgroup=f"Nc_fill_{Nc}",
+                        marker=dict(color=color_map[Nc], size=8, symbol='circle-open'),
+                        line=dict(color=color_map[Nc], width=2, dash='dot'),
+                        showlegend=False,
+                        hovertemplate="U=%{x:.3g}<br>n_cluster=%{y:.6f}<extra></extra>",
+                    ),
+                    row=row_filling,
+                    col=col,
+                )
+                any_trace = True
 
-        fig.update_xaxes(title_text="U", row=row, col=col)
+        fig.update_xaxes(title_text="U", row=row_energy, col=col)
+        fig.update_xaxes(title_text="U", row=row_filling, col=col)
         fig.update_yaxes(
             title_text="Energy per site",
-            row=row,
+            row=row_energy,
             col=col,
             type='linear', # Always linear for energies
             tickformat='.4f'
         )
+        fig.update_yaxes(
+            title_text="Filling per site",
+            row=row_filling,
+            col=col,
+            type='linear',
+            range=[0, 2],
+        )
 
         x_center = (col - 0.5) / n_cols
-        y_top = 1 - (row - 1) / n_rows
+        y_top = 1 - (row_energy - 1) / n_rows
         subplot_annotations.append(
             dict(
                 text=f"V = {V:.3g}",
@@ -1517,13 +1928,20 @@ def compare_U_values_with_dmrg(
         Nc: {V: cluster_results[(Nc, V)].tolist() for V in v_list}
         for Nc in cluster_sizes
     }
+    cluster_fillings_serialized = {
+        Nc: {V: cluster_fillings[(Nc, V)].tolist() for V in v_list}
+        for Nc in cluster_sizes
+    }
     results_payload = {
         'cluster_sizes': cluster_sizes,
         'U_values': u_list,
         'V_values': v_list,
         'cluster_energies': cluster_energy_serialized,
+        'cluster_fillings': cluster_fillings_serialized,
         'idmrg_energies': idmrg_cache.tolist(),
         'finite_dmrg_energies': finite_dmrg_cache.tolist(),
+        'idmrg_fillings': idmrg_fill_cache.tolist(),
+        'finite_dmrg_fillings': finite_dmrg_fill_cache.tolist(),
         'int_sep_ratios': {Nc: ratio_map[Nc] for Nc in cluster_sizes},
         'parameters': {
             'v_sep_ratio': v_sep_ratio,
@@ -1538,6 +1956,16 @@ def compare_U_values_with_dmrg(
         'artifacts': saved_paths,
         'failures': failed_calculations,
     }
+    if include_timing and timing_recorder is not None:
+        results_payload['timings'] = timing_recorder.records
+        if include_timing_plot and timing_recorder.records:
+            fig_timing, timing_artifacts = plot_timings(
+                timing_recorder.records,
+                output_dir=output_dir,
+                filename_prefix=f"{filename_prefix}_timing",
+                show_plots=show_plots,
+            )
+            saved_paths['timing_plot'] = timing_artifacts.get('html')
 
     if save_data:
         pickle_name = f"{filename_prefix}_L{L}_chi{chi}_{timestamp}.pkl"

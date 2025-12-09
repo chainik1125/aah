@@ -32,6 +32,7 @@ from aah_code.cluster_model.model import ClusterModelConfig, PhysicalParams
 from aah_code.cluster_model.run_scripts_me import get_general_expectations
 from aah_code.cluster_model.plots import compare_int_seps_with_dmrg, compare_cluster_sizes_with_dmrg, compare_U_values_with_dmrg
 from aah_code.real_space_dmrg import run_dmrg_method
+import pickle
 
 def three_way_comparison_with_dmrg(
     int_sep_ratio: Tuple[int, int],
@@ -458,24 +459,41 @@ if __name__ == "__main__":
 
 
        
-
+    #up to size 10 plot: large_files/plots/U_value_energy_comparison_L40_chi64_20251208_155050.pkl, took 40m
+    
     # Example usage of the new function:
+
+    with open('/Users/dmitrymanning-coe/Downloads/merged_v_Nc12_20251208_143143.pkl', 'rb') as f:
+        results_data = pickle.load(f)
+        # print("Loaded results data keys:", results_data.keys())
+    U_values=results_data['U_values']
+    V_values=results_data['V_values']
+    int_sep_ratios=results_data['int_sep_ratios']
+    cluster_sizes=results_data['cluster_sizes']
+    print(f"params: {results_data['parameters']}")
+    exit()
+
+
     fig, results = compare_U_values_with_dmrg(
         v_sep_ratio=(1, 2),
-        int_sep_ratios={2: (1, 2),4:(1,4),8:(1,8),10:(1,10)},
-        cluster_sizes=[2,4,8,10],
-        U_values=[0, 1e-1, 5e-1, 1.0,2,3, 5,8, 10],
-        V_values=[1e-6, 0.5, 1.0],
-        L=40,
+        int_sep_ratios=int_sep_ratios,
+        cluster_sizes=cluster_sizes,
+        U_values=U_values,
+        V_values=V_values,
+        L=48,
         t=1.0,
         solver_method='sparse_ED',
         states_retained=6,
         chi=64,
         log_yaxis=False,  # Plot energies on linear scale
-        include_idmrg=True,
-        include_finite_dmrg=True,
-        save_data=True,
-        save_html=True,
-        show_plots=True
+        include_idmrg=False,
+        include_finite_dmrg=False,
+        save_data=False,
+        save_html=False,
+        show_plots=True,
+        include_timing=True,
+        include_timing_plot=True,
+        results='/Users/dmitrymanning-coe/Downloads/merged_v_Nc12_20251208_143143.pkl'
     )
+
     

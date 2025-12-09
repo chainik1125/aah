@@ -1,4 +1,5 @@
 import numpy as np
+import time
 
 
 from aah_code.cluster_model.clustering import generate_clusters,convert_site_clusters_to_k
@@ -9,7 +10,7 @@ from aah_code.cluster_model.model import ClusterModelConfig,PhysicalParams
 
 
 
-def get_general_spectra(run_config:ClusterModelConfig,return_ham:bool=False):
+def get_general_spectra(run_config:ClusterModelConfig,return_ham:bool=False,timing_recorder=None):
 	#Lets try to make the hamiltonian
 
 	k_points=[]
@@ -41,12 +42,32 @@ def get_general_spectra(run_config:ClusterModelConfig,return_ham:bool=False):
 
 		print(f'cluster_k: {cluster_k/np.pi}')
 		print(f'cluster_indices: {cluster_indices}')
+		start = time.perf_counter()
 		sc_cluster_ham,sc_cluster_basis=make_cluster_ham(cluster_k_no_last_dim,cluster_indices,t,V,U,mu_0,L,Nc,int_sep_ratio,v_sep_ratio,ham_lib='quspin')
 
 		input=(sc_cluster_ham,sc_cluster_basis)	
 	
 		solver=SpectrumSolver(input,sc_cluster_basis,ham_lib='quspin',solver_method=solver_method,states_retained=states_retained)
 		eigvals,eigvecs,n_ups,n_downs,n_tot=solver.solve_spectrum()
+		elapsed = time.perf_counter() - start
+		if timing_recorder is not None:
+			try:
+				super_cluster_size = int(np.prod(cluster_indices.shape))
+			except Exception:
+				super_cluster_size = None
+			timing_recorder.record(
+				method="cluster_ED_supercluster",
+				supercluster_index=sc_idx,
+				super_cluster_size=super_cluster_size,
+				U=U,
+				V=V,
+				t=t,
+				L=L,
+				Nc=Nc,
+				int_sep=int_sep_ratio,
+				v_sep=v_sep_ratio,
+				elapsed_sec=elapsed,
+			)
 		
 		k_points.append(cluster_k)
 		energy_spectrum.append(eigvals)
@@ -66,9 +87,9 @@ def get_general_spectra(run_config:ClusterModelConfig,return_ham:bool=False):
 		return k_points,energy_spectrum,number_spectrum,spin_spectrum
 
 
-def get_general_expectations(run_config:ClusterModelConfig):
+def get_general_expectations(run_config:ClusterModelConfig, timing_recorder=None):
 
-	spectra_4tuple=get_general_spectra(run_config)
+	spectra_4tuple=get_general_spectra(run_config, timing_recorder=timing_recorder)
 	
 	#state_params=StatesParams(spin_states=2)
 	physical_params=run_config.physical_params

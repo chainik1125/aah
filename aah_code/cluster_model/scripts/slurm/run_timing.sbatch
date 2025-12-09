@@ -234,6 +234,7 @@ source "$VENV_DIR/bin/activate"
 pushd "$SLURM_SUBMIT_DIR/aah" >/dev/null
 "$VENV_DIR/bin/python" -m pip install -e .
 popd >/dev/null
+"$VENV_DIR/bin/python" -m pip install matplotlib
 
 if command -v nvidia-smi >/dev/null 2>&1; then
     if nvidia-smi -L >/dev/null 2>&1; then
@@ -249,7 +250,12 @@ fi
 # ------------------------------------------------------------
 # Parameter grid for timing/k-point CSV
 # ------------------------------------------------------------
-export OUT_CSV="kpoint_benchmark.csv"
+TIMING_DIR="$SLURM_SUBMIT_DIR/large_files/timings"
+mkdir -p "$TIMING_DIR"
+TIMING_LOG="$TIMING_DIR/run_timing.log"
+# Mirror stdout/stderr into a persistent log
+exec > >(tee -a "$TIMING_LOG") 2>&1
+export OUT_CSV="$TIMING_DIR/kpoint_benchmark.csv"
 export U_LIST="0.5 1.0"
 export V_LIST="0.1 1.0"
 export T_LIST="1.0"
@@ -261,10 +267,10 @@ export CHI=32
 export SOLVER_METHOD="sparse_ED"
 export STATES_RETAINED=6
 
-echo "cluster_size,super_cluster_size,int_sep,v_sep,U,V,t,method,K_points" > "$OUT_CSV"
+echo "cluster_size,super_cluster_size,int_sep,v_sep,U,V,t,method,K_points,elapsed_sec" > "$OUT_CSV"
 
 "$VENV_DIR/bin/python" - <<'PY'
-import csv, os, numpy as np
+import csv, os, numpy as np, time
 
 OUT_CSV = os.environ["OUT_CSV"]
 U_LIST       = os.environ["U_LIST"].split()
@@ -283,13 +289,23 @@ from aah_code.cluster_model.model import ClusterModelConfig, PhysicalParams
 from aah_code.cluster_model.run_scripts_me import get_general_expectations
 from aah_code.real_space_dmrg import run_dmrg_method, get_gnd
 
+def supercluster_size(clusters):
+    try:
+        if clusters.ndim >= 3:
+            return int(np.prod(clusters.shape[1:3]))
+        elif clusters.ndim >= 2:
+            return int(clusters.shape[1])
+    except Exception:
+        return "N/A"
+    return "N/A"
+
 def parse_ratio(txt):
     p, q = txt.split(",")
     return (int(p), int(q))
 
 v_sep_ratio = parse_ratio(V_SEP)
 
-def row(writer, Nc, sc_size, int_sep, U, V, t, method, kpts):
+def row(writer, Nc, sc_size, int_sep, U, V, t, method, kpts, elapsed):
     writer.writerow({
         "cluster_size": Nc,
         "super_cluster_size": sc_size,
@@ -300,12 +316,13 @@ def row(writer, Nc, sc_size, int_sep, U, V, t, method, kpts):
         "t": t,
         "method": method,
         "K_points": kpts,
+        "elapsed_sec": elapsed,
     })
 
 with open(OUT_CSV, "a", newline="") as fh:
     writer = csv.DictWriter(fh, fieldnames=[
         "cluster_size","super_cluster_size","int_sep","v_sep",
-        "U","V","t","method","K_points"
+        "U","V","t","method","K_points","elapsed_sec"
     ])
     for U in map(float, U_LIST):
         mu_0 = U / 2.0
@@ -316,34 +333,116 @@ with open(OUT_CSV, "a", newline="") as fh:
                         try:
                             int_sep = parse_ratio(int_sep_txt)
                         except Exception as exc:
-                            row(writer, Nc, "N/A", ("N/A","N/A"), U, V, t, "ED_FAIL", f"int_sep parse error: {exc}")
+                            row(writer, Nc, "N/A", ("N/A","N/A"), U, V, t, "ED_FAIL", f"int_sep parse error: {exc}", "N/A")
                             continue
 
                         sc_size = "N/A"
                         # ED / cluster generation
                         try:
+                            t0 = time.perf_counter()
                             clusters = generate_clusters(L, Nc, int_sep, v_sep_ratio)
-                            sc_size = clusters.shape[1]
+                            sc_size = supercluster_size(clusters)
                             kpts = convert_site_clusters_to_k(clusters, L)
+                            elapsed_ed_total = time.perf_counter() - t0
+                            num_sc = len(kpts) if hasattr(kpts, "__len__") else 1
+                            elapsed_per_sc = elapsed_ed_total / max(num_sc, 1)
                             for sc_k in kpts:
                                 k_list = [(float(k),) if np.ndim(k) == 0 else tuple(map(float, np.ravel(k))) for k in sc_k]
-                                row(writer, Nc, sc_size, int_sep, U, V, t, "ED", k_list)
+                                row(writer, Nc, sc_size, int_sep, U, V, t, "ED", k_list, elapsed_per_sc)
                         except Exception as exc:
-                            row(writer, Nc, sc_size, int_sep, U, V, t, "ED_FAIL", str(exc))
+                            row(writer, Nc, sc_size, int_sep, U, V, t, "ED_FAIL", str(exc), "N/A")
 
                         # Finite DMRG
                         try:
+                            t0 = time.perf_counter()
                             _E, _psi, _fill = get_gnd(L=L, chi=CHI, U=U, t=t, mu=mu_0, V=V, V_sep=v_sep_ratio)
-                            row(writer, Nc, sc_size, int_sep, U, V, t, "DMRG", "N/A")
+                            elapsed_dmrg = time.perf_counter() - t0
+                            row(writer, Nc, sc_size, int_sep, U, V, t, "DMRG", "N/A", elapsed_dmrg)
                         except Exception as exc:
-                            row(writer, Nc, sc_size, int_sep, U, V, t, "DMRG_FAIL", str(exc))
+                            row(writer, Nc, sc_size, int_sep, U, V, t, "DMRG_FAIL", str(exc), "N/A")
 
                         # iDMRG
                         try:
+                            t0 = time.perf_counter()
                             _E, _fill, _psi = run_dmrg_method(U=U, mu_0=mu_0, V=V, V_sep=v_sep_ratio, t=t, system_size=L, chi=CHI)
-                            row(writer, Nc, sc_size, int_sep, U, V, t, "iDMRG", "N/A")
+                            elapsed_idmrg = time.perf_counter() - t0
+                            row(writer, Nc, sc_size, int_sep, U, V, t, "iDMRG", "N/A", elapsed_idmrg)
                         except Exception as exc:
-                            row(writer, Nc, sc_size, int_sep, U, V, t, "iDMRG_FAIL", str(exc))
+                            row(writer, Nc, sc_size, int_sep, U, V, t, "iDMRG_FAIL", str(exc), "N/A")
 PY
 
 echo "CSV written to $OUT_CSV"
+
+# Create timing plot from CSV
+"$VENV_DIR/bin/python" - <<'PY'
+import csv, os
+from collections import defaultdict
+import numpy as np
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+csv_path = os.environ["OUT_CSV"]
+output_svg = os.path.splitext(csv_path)[0] + "_timing.svg"
+
+records = []
+with open(csv_path, newline="") as fh:
+    reader = csv.DictReader(fh)
+    for row in reader:
+        method = row.get("method", "unknown")
+        if "FAIL" in method:
+            continue
+        try:
+            sc_size = float(row.get("super_cluster_size", "nan"))
+            elapsed = float(row.get("elapsed_sec", "nan"))
+        except Exception:
+            continue
+        if not np.isfinite(sc_size) or not np.isfinite(elapsed):
+            continue
+        records.append((method, sc_size, elapsed))
+
+if records:
+    agg = defaultdict(list)
+    for method, sc_size, elapsed in records:
+        agg[(method, sc_size)].append(elapsed)
+
+    plt.figure(figsize=(8, 5))
+    methods = sorted({m for m, _ in agg.keys()})
+    for method in methods:
+        xs = []
+        ys = []
+        err_up = []
+        err_down = []
+        for (m, sc_size), vals in agg.items():
+            if m != method:
+                continue
+            vals = [v for v in vals if np.isfinite(v)]
+            if not vals:
+                continue
+            mean = float(np.mean(vals))
+            vmax = float(np.max(vals))
+            vmin = float(np.min(vals))
+            xs.append(sc_size)
+            ys.append(mean)
+            err_up.append(vmax - mean)
+            err_down.append(mean - vmin)
+        if not xs:
+            continue
+        order = np.argsort(xs)
+        xs = [xs[i] for i in order]
+        ys = [ys[i] for i in order]
+        err_up = [err_up[i] for i in order]
+        err_down = [err_down[i] for i in order]
+        plt.errorbar(xs, ys, yerr=[err_down, err_up], fmt='-o', capsize=4, label=method)
+
+    plt.xlabel("Supercluster size (sites)")
+    plt.ylabel("Elapsed time (s)")
+    plt.title("Runtime per supercluster size")
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(output_svg, format="svg")
+    print(f"Saved timing plot to {output_svg}")
+else:
+    print("No valid timing records to plot.")
+PY
