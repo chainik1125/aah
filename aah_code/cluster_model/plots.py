@@ -817,6 +817,330 @@ def create_int_sep_comparison_plots(
     return figures
 
 
+def create_u_value_comparison_plots(
+    u_list: Sequence[float],
+    v_list: Sequence[float],
+    cluster_sizes: Sequence[int],
+    cluster_results: Dict[Tuple[int, float], np.ndarray],
+    cluster_fillings: Dict[Tuple[int, float], np.ndarray],
+    idmrg_cache: np.ndarray,
+    finite_dmrg_cache: np.ndarray,
+    idmrg_fill_cache: np.ndarray,
+    finite_dmrg_fill_cache: np.ndarray,
+    *,
+    v_sep_ratio: Tuple[int, int],
+    t: float,
+    L: int,
+    chi: int,
+    states_retained: int,
+    color_map: Dict[int, str],
+    output_dir: str,
+    filename_prefix: str,
+    timestamp: str,
+    show_plots: bool,
+    save_html: bool,
+    plot_relative_error: bool = False,
+):
+    """Create paginated U-value comparison plots with up to 3 V panels per page."""
+    os.makedirs(output_dir, exist_ok=True)
+
+    n_v_per_fig = 3
+    n_figures = int(np.ceil(len(v_list) / n_v_per_fig))
+    figures: List[go.Figure] = []
+    html_paths: List[str] = []
+    v_to_index = {V: idx for idx, V in enumerate(v_list)}
+
+    for fig_idx in range(n_figures):
+        start = fig_idx * n_v_per_fig
+        end = min(start + n_v_per_fig, len(v_list))
+        current_vs = v_list[start:end]
+        n_cols = len(current_vs)
+
+        energy_titles = [("Relative error" if plot_relative_error else "Energy") + f": V = {V:.3g}" for V in current_vs]
+        filling_titles = [f"Filling: V = {V:.3g}" for V in current_vs]
+
+        fig = make_subplots(
+            rows=2,
+            cols=n_cols,
+            subplot_titles=energy_titles + filling_titles,
+            horizontal_spacing=0.08,
+            vertical_spacing=0.12,
+        )
+
+        any_trace = False
+        for col_idx, V in enumerate(current_vs):
+            col = col_idx + 1
+            v_idx = v_to_index[V]
+            row_energy, row_filling = 1, 2
+
+            reference_series = finite_dmrg_cache[:, v_idx] if plot_relative_error else None
+            if plot_relative_error:
+                if not np.any(np.isfinite(reference_series)):
+                    raise ValueError(f"No finite DMRG reference available to compute relative errors for V={V}.")
+
+                def rel_err(series: np.ndarray) -> np.ndarray:
+                    with np.errstate(divide='ignore', invalid='ignore'):
+                        return np.where(
+                            np.isfinite(series) & np.isfinite(reference_series) & (reference_series != 0),
+                            np.abs(series - reference_series) / np.abs(reference_series),
+                            np.nan,
+                        )
+
+            idmrg_energies = idmrg_cache[:, v_idx]
+            if np.any(np.isfinite(idmrg_energies)) and not plot_relative_error:
+                if plot_relative_error:
+                    idmrg_rel = rel_err(idmrg_energies)
+                    fig.add_trace(
+                        go.Scatter(
+                            x=u_list,
+                            y=idmrg_rel,
+                            mode='lines+markers',
+                            name="iDMRG error",
+                            legendgroup="iDMRG",
+                            marker=dict(color='black', size=6, symbol='x'),
+                            line=dict(color='black', width=2, dash='dash'),
+                            showlegend=(col_idx == 0),
+                            hovertemplate="U=%{x:.3g}<br>rel_err=%{y:.2%}<extra></extra>",
+                        ),
+                        row=row_energy,
+                        col=col,
+                    )
+                else:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=u_list,
+                            y=idmrg_energies,
+                            mode='lines+markers',
+                            name="iDMRG",
+                            legendgroup="iDMRG",
+                            marker=dict(color='black', size=6, symbol='x'),
+                            line=dict(color='black', width=2, dash='dash'),
+                            showlegend=(col_idx == 0),
+                            hovertemplate="U=%{x:.3g}<br>E_iDMRG=%{y:.6f}<extra></extra>",
+                        ),
+                        row=row_energy,
+                        col=col,
+                    )
+                any_trace = True
+
+            idmrg_fills = idmrg_fill_cache[:, v_idx]
+            if np.any(np.isfinite(idmrg_fills)):
+                fig.add_trace(
+                    go.Scatter(
+                        x=u_list,
+                        y=idmrg_fills,
+                        mode='lines+markers',
+                        name="iDMRG (fill)",
+                        legendgroup="iDMRG_fill",
+                        marker=dict(color='black', size=6, symbol='x'),
+                        line=dict(color='black', width=2, dash='dash'),
+                        showlegend=False,
+                        hovertemplate="U=%{x:.3g}<br>n_iDMRG=%{y:.6f}<extra></extra>",
+                    ),
+                    row=row_filling,
+                    col=col,
+                )
+                any_trace = True
+
+            finite_dmrg_energies = finite_dmrg_cache[:, v_idx]
+            if np.any(np.isfinite(finite_dmrg_energies)) and not plot_relative_error:
+                fig.add_trace(
+                    go.Scatter(
+                        x=u_list,
+                        y=finite_dmrg_energies,
+                        mode='lines+markers',
+                        name="Finite DMRG",
+                        legendgroup="Finite DMRG",
+                        marker=dict(color='gray', size=6, symbol='cross'),
+                        line=dict(color='gray', width=2, dash='dot'),
+                        showlegend=(col_idx == 0),
+                        hovertemplate="U=%{x:.3g}<br>E_Finite=%{y:.6f}<extra></extra>",
+                    ),
+                    row=row_energy,
+                    col=col,
+                )
+                any_trace = True
+
+            finite_dmrg_fills = finite_dmrg_fill_cache[:, v_idx]
+            if np.any(np.isfinite(finite_dmrg_fills)):
+                fig.add_trace(
+                    go.Scatter(
+                        x=u_list,
+                        y=finite_dmrg_fills,
+                        mode='lines+markers',
+                        name="Finite DMRG (fill)",
+                        legendgroup="Finite DMRG fill",
+                        marker=dict(color='gray', size=6, symbol='cross'),
+                        line=dict(color='gray', width=2, dash='dot'),
+                        showlegend=False,
+                        hovertemplate="U=%{x:.3g}<br>n_Finite=%{y:.6f}<extra></extra>",
+                    ),
+                    row=row_filling,
+                    col=col,
+                )
+                any_trace = True
+
+            for Nc in cluster_sizes:
+                cluster_energies = cluster_results[(Nc, V)]
+                cluster_fills = cluster_fillings[(Nc, V)]
+                xs, ys, hover_text = [], [], []
+                xs_fill, ys_fill = [], []
+
+                for u_idx, U in enumerate(u_list):
+                    c_en = cluster_energies[u_idx]
+                    if not np.isfinite(c_en):
+                        continue
+
+                    # Always collect filling data
+                    c_fill = cluster_fills[u_idx]
+                    if np.isfinite(c_fill):
+                        xs_fill.append(U)
+                        ys_fill.append(c_fill)
+
+                    if plot_relative_error:
+                        ref = reference_series[u_idx]
+                        if not (np.isfinite(ref) and ref != 0):
+                            continue
+                        c_err = np.abs(c_en - ref) / np.abs(ref)
+                        xs.append(U)
+                        ys.append(c_err)
+                        hover_text.append(
+                            f"U={U:.3g}<br>V={V:.3g}<br>Nc={Nc}<br>rel_err={c_err:.2%}"
+                        )
+                    else:
+                        xs.append(U)
+                        ys.append(c_en)
+                        hover_text.append(
+                            f"U={U:.3g}<br>V={V:.3g}<br>Nc={Nc}<br>E_cluster={c_en:.6f}"
+                        )
+
+                if not xs:
+                    continue
+
+                fig.add_trace(
+                    go.Scatter(
+                        x=xs,
+                        y=ys,
+                        mode='lines+markers',
+                        name=f"Nc={Nc}",
+                        legendgroup=f"Nc={Nc}",
+                        marker=dict(color=color_map[Nc], size=8),
+                        line=dict(color=color_map[Nc], width=2),
+                        showlegend=(col_idx == 0),
+                        hovertemplate="%{text}<extra></extra>",
+                        text=hover_text,
+                    ),
+                    row=row_energy,
+                    col=col,
+                )
+                any_trace = True
+
+                if xs_fill:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=xs_fill,
+                            y=ys_fill,
+                            mode='lines+markers',
+                            name=f"Nc={Nc} (fill)",
+                            legendgroup=f"Nc_fill_{Nc}",
+                            marker=dict(color=color_map[Nc], size=8, symbol='circle-open'),
+                            line=dict(color=color_map[Nc], width=2, dash='dot'),
+                            showlegend=False,
+                            hovertemplate="U=%{x:.3g}<br>n_cluster=%{y:.6f}<extra></extra>",
+                        ),
+                        row=row_filling,
+                        col=col,
+                    )
+                    any_trace = True
+
+            # Add vertical line at U=V/2 for both energy and filling subplots
+            u_critical = V / 2
+
+            # Add as a trace for legend (only on first column to show in legend once)
+            for row in [row_energy, row_filling]:
+                # Add invisible scatter trace for legend entry (only once per figure)
+                if col == 1 and row == row_energy:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=[u_critical],
+                            y=[None],
+                            mode='lines',
+                            name='U=V/2',
+                            line=dict(color='gray', dash='dot', width=1),
+                            showlegend=True,
+                            hoverinfo='skip',
+                        ),
+                        row=row,
+                        col=col,
+                    )
+
+                # Add the actual vertical line
+                fig.add_vline(
+                    x=u_critical,
+                    row=row,
+                    col=col,
+                    line_dash="dot",
+                    line_color="gray",
+                    line_width=1,
+                    annotation_text=None,  # No annotation to avoid clutter
+                )
+
+            fig.update_xaxes(title_text="U", row=row_energy, col=col)
+            fig.update_xaxes(title_text="U", row=row_filling, col=col)
+            fig.update_yaxes(
+                title_text="Relative error" if plot_relative_error else "Energy per site",
+                row=row_energy,
+                col=col,
+                type='linear',
+                tickformat='.2%' if plot_relative_error else '.4f',
+            )
+            fig.update_yaxes(title_text="Filling per site", row=row_filling, col=col, type='linear', range=[0, 2])
+
+        if not any_trace:
+            raise RuntimeError("No valid data points available to plot U-value convergence.")
+
+        v_sep_label = format_sep_as_pi(v_sep_ratio)
+        annotation_text = (
+            f"v_sep={v_sep_label}, t={t}, L={L}, chi={chi}, states={states_retained} "
+            f"| Page {fig_idx + 1}/{n_figures}"
+        )
+
+        fig.update_layout(
+            title=dict(
+                text="Relative Error vs U" if plot_relative_error else "Ground State Energy vs U",
+                x=0.5,
+                xanchor='center'
+            ),
+            hovermode='closest',
+            legend_title="Method",
+            annotations=[
+                dict(
+                    text=annotation_text,
+                    x=0.5,
+                    xref='paper',
+                    y=1.06,
+                    yref='paper',
+                    showarrow=False,
+                    font=dict(size=12, color='gray'),
+                )
+            ],
+        )
+
+        if save_html:
+            html_name = f"{filename_prefix}_L{L}_chi{chi}_{timestamp}_page_{fig_idx + 1}.html"
+            html_path = os.path.join(output_dir, html_name)
+            fig.write_html(html_path)
+            html_paths.append(html_path)
+            print(f"Saved figure to {html_path}")
+
+        if show_plots:
+            fig.show()
+
+        figures.append(fig)
+
+    return figures, html_paths
+
+
 def compare_cluster_sizes_with_dmrg(
     v_sep_ratio: Tuple[int, int],
     int_sep_ratios: Union[Tuple[int, int], Dict[int, Tuple[int, int]]],
@@ -906,6 +1230,9 @@ def compare_cluster_sizes_with_dmrg(
 
     u_list = [float(u) for u in U_values]
     v_list = [float(v) for v in V_values]
+
+    if plot_relative_error and not include_finite_dmrg:
+        raise ValueError("plot_relative_error requires include_finite_dmrg=True to supply the finite DMRG reference.")
 
     v_sep_ratio = _coerce_ratio(v_sep_ratio, "V separation")
 
@@ -1301,9 +1628,6 @@ def compare_cluster_sizes_with_dmrg(
             print(f"{failure['method']}: {params_desc}")
             print(f"  Error: {failure['error'].splitlines()[0]}")
 
-    if show_plots:
-        fig.show()
-
     return fig, results_payload
 
 
@@ -1351,6 +1675,7 @@ def compare_U_values_with_dmrg(
     include_finite_dmrg: bool = True,
     include_timing: bool = False,
     include_timing_plot: bool = False,
+    plot_relative_error: bool = False,
     results: Optional[Union[Dict, str, os.PathLike]] = None,
 ) -> Tuple[go.Figure, Dict]:
     """
@@ -1383,6 +1708,7 @@ def compare_U_values_with_dmrg(
         log_yaxis: Plot the y-axis on a log scale (not used for energy plots).
         include_idmrg: Whether to include iDMRG reference calculations.
         include_finite_dmrg: Whether to include finite DMRG reference calculations.
+        plot_relative_error: If True, energy panels show |E_finite - E| / |E_finite| (finite DMRG as reference) with percent tick labels.
 
     Returns:
         (figure, results_dict)
@@ -1521,6 +1847,8 @@ def compare_U_values_with_dmrg(
         states_retained = params.get('states_retained', states_retained)
         include_idmrg = params.get('include_idmrg', include_idmrg)
         include_finite_dmrg = params.get('include_finite_dmrg', include_finite_dmrg)
+        if plot_relative_error and not include_finite_dmrg:
+            raise ValueError("Cached results do not include finite DMRG data required for plot_relative_error.")
     else:
         # Storage for computed energies
         cluster_results = {
@@ -1672,257 +2000,43 @@ def compare_U_values_with_dmrg(
                         })
 
     # --- PLOTTING LOGIC ---
-    # Subplots are V values; two rows per V (energy, filling)
-    n_cols = min(3, len(v_list))
-    n_rows_base = int(np.ceil(len(v_list) / n_cols))
-    n_rows = n_rows_base * 2
-    subplot_titles = []
-    for idx in range(n_rows_base * n_cols):
-        if idx < len(v_list):
-            subplot_titles.append(f"Energy: V = {v_list[idx]:.3g}")
-        else:
-            subplot_titles.append("")
-    for idx in range(n_rows_base * n_cols):
-        if idx < len(v_list):
-            subplot_titles.append(f"Filling: V = {v_list[idx]:.3g}")
-        else:
-            subplot_titles.append("")
-    fig = make_subplots(
-        rows=n_rows,
-        cols=n_cols,
-        subplot_titles=subplot_titles,
-        horizontal_spacing=0.08,
-        vertical_spacing=0.12,
-    )
-
     color_palette = [
         '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728',
         '#9467bd', '#8c564b', '#e377c2', '#7f7f7f',
         '#bcbd22', '#17becf',
     ]
-    # Color map for cluster sizes now
-    color_map = {
-        Nc: color_palette[idx % len(color_palette)]
-        for idx, Nc in enumerate(cluster_sizes)
-    }
+    color_map = {Nc: color_palette[idx % len(color_palette)] for idx, Nc in enumerate(cluster_sizes)}
 
-    any_trace = False
-    subplot_annotations: List[Dict] = []
-    
-    for v_idx, V in enumerate(v_list):
-        row_energy = (v_idx // n_cols) + 1
-        col = (v_idx % n_cols) + 1
-        row_filling = row_energy + n_rows_base
-        
-        # Plot iDMRG reference if available
-        idmrg_energies = idmrg_cache[:, v_idx]
-        if np.any(np.isfinite(idmrg_energies)):
-            fig.add_trace(
-                go.Scatter(
-                    x=u_list,
-                    y=idmrg_energies,
-                    mode='lines+markers',
-                    name="iDMRG",
-                    legendgroup="iDMRG",
-                    marker=dict(color='black', size=6, symbol='x'),
-                    line=dict(color='black', width=2, dash='dash'),
-                    showlegend=(v_idx == 0),
-                    hovertemplate="U=%{x:.3g}<br>E_iDMRG=%{y:.6f}<extra></extra>",
-                ),
-                row=row_energy,
-                col=col,
-            )
-            any_trace = True
-        # Filling iDMRG
-        idmrg_fills = idmrg_fill_cache[:, v_idx]
-        if np.any(np.isfinite(idmrg_fills)):
-            fig.add_trace(
-                go.Scatter(
-                    x=u_list,
-                    y=idmrg_fills,
-                    mode='lines+markers',
-                    name="iDMRG (fill)",
-                    legendgroup="iDMRG_fill",
-                    marker=dict(color='black', size=6, symbol='x'),
-                    line=dict(color='black', width=2, dash='dash'),
-                    showlegend=False,
-                    hovertemplate="U=%{x:.3g}<br>n_iDMRG=%{y:.6f}<extra></extra>",
-                ),
-                row=row_filling,
-                col=col,
-            )
-            any_trace = True
-            
-        # Plot Finite DMRG reference if available
-        finite_dmrg_energies = finite_dmrg_cache[:, v_idx]
-        if np.any(np.isfinite(finite_dmrg_energies)):
-            fig.add_trace(
-                go.Scatter(
-                    x=u_list,
-                    y=finite_dmrg_energies,
-                    mode='lines+markers',
-                    name="Finite DMRG",
-                    legendgroup="Finite DMRG",
-                    marker=dict(color='gray', size=6, symbol='cross'),
-                    line=dict(color='gray', width=2, dash='dot'),
-                    showlegend=(v_idx == 0),
-                    hovertemplate="U=%{x:.3g}<br>E_Finite=%{y:.6f}<extra></extra>",
-                ),
-                row=row_energy,
-                col=col,
-            )
-            any_trace = True
-        finite_dmrg_fills = finite_dmrg_fill_cache[:, v_idx]
-        if np.any(np.isfinite(finite_dmrg_fills)):
-            fig.add_trace(
-                go.Scatter(
-                    x=u_list,
-                    y=finite_dmrg_fills,
-                    mode='lines+markers',
-                    name="Finite DMRG (fill)",
-                    legendgroup="Finite DMRG fill",
-                    marker=dict(color='gray', size=6, symbol='cross'),
-                    line=dict(color='gray', width=2, dash='dot'),
-                    showlegend=False,
-                    hovertemplate="U=%{x:.3g}<br>n_Finite=%{y:.6f}<extra></extra>",
-                ),
-                row=row_filling,
-                col=col,
-            )
-            any_trace = True
-
-        for Nc in cluster_sizes:
-            # Get data for this V and Nc across all U
-            cluster_energies = cluster_results[(Nc, V)] # Array of length len(u_list)
-            cluster_fills = cluster_fillings[(Nc, V)]
-            
-            xs = []
-            ys = []
-            hover_text = []
-            xs_fill = []
-            ys_fill = []
-            
-            for u_idx, U in enumerate(u_list):
-                c_en = cluster_energies[u_idx]
-                c_fill = cluster_fills[u_idx]
-                
-                if not np.isfinite(c_en):
-                    continue
-                    
-                xs.append(U)
-                ys.append(c_en)
-                hover_text.append(
-                    f"U={U:.3g}<br>V={V:.3g}<br>Nc={Nc}<br>"
-                    f"E_cluster={c_en:.6f}"
-                )
-                if np.isfinite(c_fill):
-                    xs_fill.append(U)
-                    ys_fill.append(c_fill)
-            
-            if not xs:
-                continue
-
-            fig.add_trace(
-                go.Scatter(
-                    x=xs,
-                    y=ys,
-                    mode='lines+markers',
-                    name=f"Nc={Nc}",
-                    legendgroup=f"Nc={Nc}",
-                    marker=dict(color=color_map[Nc], size=8),
-                    line=dict(color=color_map[Nc], width=2),
-                    showlegend=(v_idx == 0),
-                    hovertemplate="%{text}<extra></extra>",
-                    text=hover_text,
-                ),
-                row=row_energy,
-                col=col,
-            )
-            any_trace = True
-            if xs_fill:
-                fig.add_trace(
-                    go.Scatter(
-                        x=xs_fill,
-                        y=ys_fill,
-                        mode='lines+markers',
-                        name=f"Nc={Nc} (fill)",
-                        legendgroup=f"Nc_fill_{Nc}",
-                        marker=dict(color=color_map[Nc], size=8, symbol='circle-open'),
-                        line=dict(color=color_map[Nc], width=2, dash='dot'),
-                        showlegend=False,
-                        hovertemplate="U=%{x:.3g}<br>n_cluster=%{y:.6f}<extra></extra>",
-                    ),
-                    row=row_filling,
-                    col=col,
-                )
-                any_trace = True
-
-        fig.update_xaxes(title_text="U", row=row_energy, col=col)
-        fig.update_xaxes(title_text="U", row=row_filling, col=col)
-        fig.update_yaxes(
-            title_text="Energy per site",
-            row=row_energy,
-            col=col,
-            type='linear', # Always linear for energies
-            tickformat='.4f'
-        )
-        fig.update_yaxes(
-            title_text="Filling per site",
-            row=row_filling,
-            col=col,
-            type='linear',
-            range=[0, 2],
-        )
-
-        x_center = (col - 0.5) / n_cols
-        y_top = 1 - (row_energy - 1) / n_rows
-        subplot_annotations.append(
-            dict(
-                text=f"V = {V:.3g}",
-                x=x_center,
-                xref='paper',
-                y=y_top - 0.06,
-                yref='paper',
-                showarrow=False,
-                font=dict(size=12, color='black')
-            )
-        )
-
-    if not any_trace:
-        raise RuntimeError("No valid data points available to plot U-value convergence.")
-
-    v_sep_label = format_sep_as_pi(v_sep_ratio)
-    annotation_text = (
-        f"v_sep={v_sep_label}, t={t}, L={L}, chi={chi}, states={states_retained}"
-    )
-
-    fig.update_layout(
-        title=dict(text="Ground State Energy vs U", x=0.5, xanchor='center'),
-        hovermode='closest',
-        legend_title="Method",
-        annotations=subplot_annotations + [
-            dict(
-                text=annotation_text,
-                x=0.5,
-                xref='paper',
-                y=1.06,
-                yref='paper',
-                showarrow=False,
-                font=dict(size=12, color='gray'),
-            )
-        ],
-    )
-
-    os.makedirs(output_dir, exist_ok=True)
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    figures, html_paths = create_u_value_comparison_plots(
+        u_list=u_list,
+        v_list=v_list,
+        cluster_sizes=cluster_sizes,
+        cluster_results=cluster_results,
+        cluster_fillings=cluster_fillings,
+        idmrg_cache=idmrg_cache,
+        finite_dmrg_cache=finite_dmrg_cache,
+        idmrg_fill_cache=idmrg_fill_cache,
+        finite_dmrg_fill_cache=finite_dmrg_fill_cache,
+        v_sep_ratio=v_sep_ratio,
+        t=t,
+        L=L,
+        chi=chi,
+        states_retained=states_retained,
+        color_map=color_map,
+        output_dir=output_dir,
+        filename_prefix=filename_prefix,
+        timestamp=timestamp,
+        show_plots=show_plots,
+        save_html=save_html,
+        plot_relative_error=plot_relative_error,
+    )
+    fig = figures[0] if figures else None
     saved_paths = {}
-
     if save_html:
-        html_name = f"{filename_prefix}_L{L}_chi{chi}_{timestamp}.html"
-        html_path = os.path.join(output_dir, html_name)
-        fig.write_html(html_path)
-        saved_paths['html'] = html_path
-        print(f"Saved figure to {html_path}")
+        saved_paths['html_pages'] = html_paths
+        if html_paths:
+            saved_paths['html'] = html_paths[0]
 
     cluster_energy_serialized = {
         Nc: {V: cluster_results[(Nc, V)].tolist() for V in v_list}
@@ -1952,6 +2066,7 @@ def compare_U_values_with_dmrg(
             'states_retained': states_retained,
             'include_idmrg': include_idmrg,
             'include_finite_dmrg': include_finite_dmrg,
+            'plot_relative_error': plot_relative_error,
         },
         'artifacts': saved_paths,
         'failures': failed_calculations,

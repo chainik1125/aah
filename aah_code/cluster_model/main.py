@@ -463,7 +463,9 @@ if __name__ == "__main__":
     
     # Example usage of the new function:
 
-    with open('/Users/dmitrymanning-coe/Downloads/merged_v_Nc12_20251208_143143.pkl', 'rb') as f:
+    data_path='/Users/dmitrymanning-coe/Documents/Research/Barry Bradlyn/Moire/K_blocking/new_code/aah/aah_code/cluster_model/large_files/cluster_runs/merged_results/sep_1-2_merge.pkl'
+
+    with open(data_path, 'rb') as f:
         results_data = pickle.load(f)
         # print("Loaded results data keys:", results_data.keys())
     U_values=results_data['U_values']
@@ -471,20 +473,21 @@ if __name__ == "__main__":
     int_sep_ratios=results_data['int_sep_ratios']
     cluster_sizes=results_data['cluster_sizes']
     print(f"params: {results_data['parameters']}")
-    exit()
+    print(f"U_values: {U_values}")
+    
 
 
     fig, results = compare_U_values_with_dmrg(
         v_sep_ratio=(1, 2),
-        int_sep_ratios=int_sep_ratios,
-        cluster_sizes=cluster_sizes,
+        int_sep_ratios={2*n:(1,2*n) for n in range(2)},
+        cluster_sizes=[2*n for n in range(1,2)],
         U_values=U_values,
         V_values=V_values,
-        L=48,
+        L=24,
         t=1.0,
         solver_method='sparse_ED',
         states_retained=6,
-        chi=64,
+        chi=32,
         log_yaxis=False,  # Plot energies on linear scale
         include_idmrg=False,
         include_finite_dmrg=False,
@@ -493,7 +496,8 @@ if __name__ == "__main__":
         show_plots=True,
         include_timing=True,
         include_timing_plot=True,
-        results='/Users/dmitrymanning-coe/Downloads/merged_v_Nc12_20251208_143143.pkl'
+        plot_relative_error=True,
+        results=None
     )
 
     
