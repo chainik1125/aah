@@ -48,7 +48,8 @@ def get_general_spectra(run_config:ClusterModelConfig,return_ham:bool=False,timi
 		input=(sc_cluster_ham,sc_cluster_basis)	
 	
 		solver=SpectrumSolver(input,sc_cluster_basis,ham_lib='quspin',solver_method=solver_method,states_retained=states_retained)
-		eigvals,eigvecs,n_ups,n_downs,n_tot=solver.solve_spectrum()
+		energies,eigvecs,n_ups,n_downs,n_tot,number_sectors=solver.solve_spectrum()
+		
 		elapsed = time.perf_counter() - start
 		if timing_recorder is not None:
 			try:
@@ -70,7 +71,7 @@ def get_general_spectra(run_config:ClusterModelConfig,return_ham:bool=False,timi
 			)
 		
 		k_points.append(cluster_k)
-		energy_spectrum.append(eigvals)
+		energy_spectrum.append(energies)
 		number_spectrum.append(n_tot)
 		spin_spectrum.append(np.array([n_ups,n_downs]))
 		if return_ham:
@@ -80,7 +81,7 @@ def get_general_spectra(run_config:ClusterModelConfig,return_ham:bool=False,timi
 	energy_spectrum=np.stack(energy_spectrum,axis=0)
 	number_spectrum=np.stack(number_spectrum,axis=0)
 	spin_spectrum=np.stack(spin_spectrum,axis=0)
-
+	
 	if return_ham:
 		return ham_objects
 	else:
@@ -90,14 +91,17 @@ def get_general_spectra(run_config:ClusterModelConfig,return_ham:bool=False,timi
 def get_general_expectations(run_config:ClusterModelConfig, timing_recorder=None):
 
 	spectra_4tuple=get_general_spectra(run_config, timing_recorder=timing_recorder)
-	
+	#NOTE! Now I have the spectra outputted as pooling the total energies across number sectors
+	# in a cluster - i.e. 
 	#state_params=StatesParams(spin_states=2)
 	physical_params=run_config.physical_params
-	print(f'k points shape: {spectra_4tuple[0].shape},\n energies shape: {spectra_4tuple[1].shape},\n number_spectrum shape: {spectra_4tuple[2].shape}, spin spectrum shape: {spectra_4tuple[3].shape}')
-
-	full_spectrum_obj=FullSpectrum(None,None,physical_params,None)
-	system_expectations,cluster_expectations=full_spectrum_obj.get_cluster_thermodynamic_expectations(spectra_4tuple,None)
 	
+	print(f'k points shape: {spectra_4tuple[0].shape},\n energies shape: {spectra_4tuple[1].shape},\n number_spectrum shape: {spectra_4tuple[2].shape}, spin spectrum shape: {spectra_4tuple[3].shape}')
+	
+	full_spectrum_obj=FullSpectrum(None,None,physical_params,None)
+	
+	system_expectations,cluster_expectations=full_spectrum_obj.get_cluster_thermodynamic_expectations(spectra_4tuple)
+	exit()
 	return system_expectations,cluster_expectations
 
 

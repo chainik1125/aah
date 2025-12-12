@@ -463,7 +463,7 @@ if __name__ == "__main__":
     
     # Example usage of the new function:
 
-    data_path='/Users/dmitrymanning-coe/Documents/Research/Barry Bradlyn/Moire/K_blocking/new_code/aah/aah_code/cluster_model/large_files/cluster_runs/merged_results/sep_1-2_merge.pkl'
+    data_path='/Users/dmitrymanning-coe/Documents/Research/Barry Bradlyn/Moire/K_blocking/new_code/aah/aah_code/cluster_model/large_files/cluster_runs/merged_results/sep_1-4_merge.pkl'
 
     with open(data_path, 'rb') as f:
         results_data = pickle.load(f)
@@ -479,8 +479,8 @@ if __name__ == "__main__":
 
     fig, results = compare_U_values_with_dmrg(
         v_sep_ratio=(1, 2),
-        int_sep_ratios={2*n:(1,2*n) for n in range(2)},
-        cluster_sizes=[2*n for n in range(1,2)],
+        int_sep_ratios=int_sep_ratios,
+        cluster_sizes=cluster_sizes,
         U_values=U_values,
         V_values=V_values,
         L=24,
