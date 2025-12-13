@@ -479,10 +479,10 @@ if __name__ == "__main__":
 
     fig, results = compare_U_values_with_dmrg(
         v_sep_ratio=(1, 2),
-        int_sep_ratios=int_sep_ratios,
-        cluster_sizes=cluster_sizes,
-        U_values=U_values,
-        V_values=V_values,
+        int_sep_ratios={2:(1,2)},
+        cluster_sizes=[2],
+        U_values=[0,1,2],
+        V_values=[1e-1],
         L=24,
         t=1.0,
         solver_method='sparse_ED',
