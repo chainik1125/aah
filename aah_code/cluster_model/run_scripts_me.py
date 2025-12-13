@@ -101,7 +101,7 @@ def get_general_expectations(run_config:ClusterModelConfig, timing_recorder=None
 	full_spectrum_obj=FullSpectrum(None,None,physical_params,None)
 	
 	system_expectations,cluster_expectations=full_spectrum_obj.get_cluster_thermodynamic_expectations(spectra_4tuple)
-	exit()
+	
 	return system_expectations,cluster_expectations
 
 

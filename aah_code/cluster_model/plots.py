@@ -1113,17 +1113,15 @@ def create_u_value_comparison_plots(
             ),
             hovermode='closest',
             legend_title="Method",
-            annotations=[
-                dict(
-                    text=annotation_text,
-                    x=0.5,
-                    xref='paper',
-                    y=1.06,
-                    yref='paper',
-                    showarrow=False,
-                    font=dict(size=12, color='gray'),
-                )
-            ],
+        )
+        fig.add_annotation(
+            text=annotation_text,
+            x=0.5,
+            xref='paper',
+            y=1.06,
+            yref='paper',
+            showarrow=False,
+            font=dict(size=12, color='gray'),
         )
 
         if save_html:
@@ -1992,6 +1990,7 @@ def compare_U_values_with_dmrg(
                         energy, filling, _ = system_expectations
                         energy_subtracted = (energy + mu_0 * filling) / L
                         cluster_results[(Nc, V)][u_idx] = energy_subtracted
+                        cluster_fillings[(Nc, V)][u_idx] = filling / L
                     except Exception as exc:
                         failed_calculations.append({
                             'method': f'cluster Nc={Nc}',
