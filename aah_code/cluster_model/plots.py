@@ -4,6 +4,8 @@ Plotting functions for comparing different cluster model setups with iDMRG.
 
 import numpy as np
 import time
+import csv
+import json
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import plotly.io as pio
@@ -17,7 +19,7 @@ from pathlib import Path
 from aah_code.cluster_model.model import ClusterModelConfig, PhysicalParams
 from aah_code.cluster_model.clustering import generate_clusters
 from aah_code.cluster_model.run_scripts_me import get_general_expectations
-from aah_code.real_space_dmrg import run_dmrg_method, get_gnd
+from aah_code.real_space_dmrg import run_dmrg_method, get_gnd, get_gnd_fixed_filling
 
 # Configure plotly to work outside of notebooks
 pio.renderers.default = "browser"
@@ -31,11 +33,83 @@ except ImportError:
 
 class TimingRecorder:
     """Collects timing records when enabled."""
-    def __init__(self):
+    def __init__(
+        self,
+        *,
+        csv_path: Optional[Union[str, os.PathLike]] = None,
+        csv_only_method: Optional[str] = "cluster_ED_supercluster",
+    ):
         self.records: List[Dict] = []
+        self.csv_path = Path(csv_path).expanduser().resolve() if csv_path else None
+        self.csv_only_method = csv_only_method
+        self._csv_fh = None
+        self._csv_writer: Optional[csv.DictWriter] = None
+        self._csv_fieldnames = [
+            "timestamp",
+            "method",
+            "elapsed_sec",
+            "U",
+            "V",
+            "t",
+            "L",
+            "Nc",
+            "supercluster_index",
+            "super_cluster_size",
+            "int_sep",
+            "v_sep",
+            "slurm_job_id",
+            "slurm_array_job_id",
+            "slurm_array_task_id",
+            "pid",
+            "meta_json",
+        ]
+        if self.csv_path is not None:
+            self.csv_path.parent.mkdir(parents=True, exist_ok=True)
+            self._csv_fh = self.csv_path.open("a", newline="")
+            self._csv_writer = csv.DictWriter(self._csv_fh, fieldnames=self._csv_fieldnames)
+            if self.csv_path.stat().st_size == 0:
+                self._csv_writer.writeheader()
+                self._csv_fh.flush()
 
     def record(self, **kwargs):
         self.records.append(kwargs)
+        if self._csv_writer is None or self._csv_fh is None:
+            return
+
+        method = kwargs.get("method")
+        if self.csv_only_method is not None and method != self.csv_only_method:
+            return
+
+        def fmt_ratio(value) -> str:
+            if value is None:
+                return ""
+            if isinstance(value, np.ndarray):
+                value = value.tolist()
+            if isinstance(value, (list, tuple)) and len(value) == 2:
+                return f"{value[0]},{value[1]}"
+            return str(value)
+
+        row = {
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "method": "" if method is None else str(method),
+            "elapsed_sec": kwargs.get("elapsed_sec", ""),
+            "U": kwargs.get("U", ""),
+            "V": kwargs.get("V", ""),
+            "t": kwargs.get("t", ""),
+            "L": kwargs.get("L", ""),
+            "Nc": kwargs.get("Nc", ""),
+            "supercluster_index": kwargs.get("supercluster_index", ""),
+            "super_cluster_size": kwargs.get("super_cluster_size", ""),
+            "int_sep": fmt_ratio(kwargs.get("int_sep")),
+            "v_sep": fmt_ratio(kwargs.get("v_sep")),
+            "slurm_job_id": os.environ.get("SLURM_JOB_ID", ""),
+            "slurm_array_job_id": os.environ.get("SLURM_ARRAY_JOB_ID", ""),
+            "slurm_array_task_id": os.environ.get("SLURM_ARRAY_TASK_ID", ""),
+            "pid": os.getpid(),
+            "meta_json": json.dumps(kwargs, default=str, sort_keys=True),
+        }
+        self._csv_writer.writerow(row)
+        self._csv_fh.flush()
 
 
 def time_call(recorder: Optional[TimingRecorder], meta: Dict, func, *args, **kwargs):
@@ -839,6 +913,9 @@ def create_u_value_comparison_plots(
     timestamp: str,
     show_plots: bool,
     save_html: bool,
+    set_filling: Optional[float] = None,
+    mu_source_Nc: Optional[int] = None,
+    dmrg_fixed_filling: bool = False,
     plot_relative_error: bool = False,
 ):
     """Create paginated U-value comparison plots with up to 3 V panels per page."""
@@ -944,13 +1021,14 @@ def create_u_value_comparison_plots(
 
             finite_dmrg_energies = finite_dmrg_cache[:, v_idx]
             if np.any(np.isfinite(finite_dmrg_energies)) and not plot_relative_error:
+                finite_label = "Finite DMRG (fixed N)" if dmrg_fixed_filling else "Finite DMRG"
                 fig.add_trace(
                     go.Scatter(
                         x=u_list,
                         y=finite_dmrg_energies,
                         mode='lines+markers',
-                        name="Finite DMRG",
-                        legendgroup="Finite DMRG",
+                        name=finite_label,
+                        legendgroup=finite_label,
                         marker=dict(color='gray', size=6, symbol='cross'),
                         line=dict(color='gray', width=2, dash='dot'),
                         showlegend=(col_idx == 0),
@@ -963,13 +1041,14 @@ def create_u_value_comparison_plots(
 
             finite_dmrg_fills = finite_dmrg_fill_cache[:, v_idx]
             if np.any(np.isfinite(finite_dmrg_fills)):
+                finite_fill_label = "Finite DMRG (fill, fixed N)" if dmrg_fixed_filling else "Finite DMRG (fill)"
                 fig.add_trace(
                     go.Scatter(
                         x=u_list,
                         y=finite_dmrg_fills,
                         mode='lines+markers',
-                        name="Finite DMRG (fill)",
-                        legendgroup="Finite DMRG fill",
+                        name=finite_fill_label,
+                        legendgroup=finite_fill_label,
                         marker=dict(color='gray', size=6, symbol='cross'),
                         line=dict(color='gray', width=2, dash='dot'),
                         showlegend=False,
@@ -1100,10 +1179,20 @@ def create_u_value_comparison_plots(
             raise RuntimeError("No valid data points available to plot U-value convergence.")
 
         v_sep_label = format_sep_as_pi(v_sep_ratio)
-        annotation_text = (
-            f"v_sep={v_sep_label}, t={t}, L={L}, chi={chi}, states={states_retained} "
-            f"| Page {fig_idx + 1}/{n_figures}"
-        )
+        annotation_parts = [
+            f"v_sep={v_sep_label}",
+            f"t={t}",
+            f"L={L}",
+            f"chi={chi}",
+            f"states={states_retained}",
+        ]
+        if set_filling is not None:
+            annotation_parts.insert(1, f"n_target={set_filling}")
+            if mu_source_Nc is not None:
+                annotation_parts.insert(2, f"mu_from=Nc{mu_source_Nc}")
+            if dmrg_fixed_filling:
+                annotation_parts.insert(3, "finite_DMRG=fixed_N")
+        annotation_text = ", ".join(annotation_parts) + f" | Page {fig_idx + 1}/{n_figures}"
 
         fig.update_layout(
             title=dict(
@@ -1674,6 +1763,8 @@ def compare_U_values_with_dmrg(
     include_timing: bool = False,
     include_timing_plot: bool = False,
     plot_relative_error: bool = False,
+    set_filling: Optional[float] = None,
+    dmrg_fixed_filling: bool = False,
     results: Optional[Union[Dict, str, os.PathLike]] = None,
 ) -> Tuple[go.Figure, Dict]:
     """
@@ -1707,6 +1798,10 @@ def compare_U_values_with_dmrg(
         include_idmrg: Whether to include iDMRG reference calculations.
         include_finite_dmrg: Whether to include finite DMRG reference calculations.
         plot_relative_error: If True, energy panels show |E_finite - E| / |E_finite| (finite DMRG as reference) with percent tick labels.
+        set_filling: If provided, first solve for a chemical potential (from the cluster spectra)
+            that targets this filling (per site), then use the resulting average mu in DMRG.
+        dmrg_fixed_filling: If True, finite DMRG is run in the canonical ensemble (fixed N corresponding
+            to set_filling) with mu=0. iDMRG remains grand-canonical using the cluster-derived mu.
 
     Returns:
         (figure, results_dict)
@@ -1714,6 +1809,8 @@ def compare_U_values_with_dmrg(
 
     if t is None:
         raise ValueError("Parameter t must be specified for the cluster calculations.")
+    if dmrg_fixed_filling and include_finite_dmrg and set_filling is None:
+        raise ValueError("dmrg_fixed_filling=True requires set_filling to be provided.")
 
     def _coerce_ratio(value, label: str) -> Tuple[int, int]:
         if value is None:
@@ -1764,7 +1861,8 @@ def compare_U_values_with_dmrg(
     idmrg_fill_cache: np.ndarray
     finite_dmrg_fill_cache: np.ndarray
     failed_calculations: List[Dict] = []
-    timing_recorder = TimingRecorder() if include_timing else None
+    timing_csv_path = os.environ.get("TIMING_CSV") if include_timing else None
+    timing_recorder = TimingRecorder(csv_path=timing_csv_path) if include_timing else None
 
     if results is not None:
         if isinstance(results, (str, os.PathLike)):
@@ -1779,6 +1877,9 @@ def compare_U_values_with_dmrg(
         save_data = False  # Avoid re-saving when plotting from cached data
         print("Using precomputed results payload; skipping new simulations.")
         params = results.get('parameters', {})
+        stored_set_filling = params.get('set_filling', set_filling)
+        set_filling = float(stored_set_filling) if stored_set_filling is not None else None
+        dmrg_fixed_filling = bool(params.get('dmrg_fixed_filling', dmrg_fixed_filling))
         
         # Load caches if available, otherwise fill with NaN
         idmrg_cache = np.asarray(results.get('idmrg_energies', []), dtype=float)
@@ -1845,6 +1946,8 @@ def compare_U_values_with_dmrg(
         states_retained = params.get('states_retained', states_retained)
         include_idmrg = params.get('include_idmrg', include_idmrg)
         include_finite_dmrg = params.get('include_finite_dmrg', include_finite_dmrg)
+        if dmrg_fixed_filling and include_finite_dmrg and set_filling is None:
+            raise ValueError("Cached results have dmrg_fixed_filling=True but set_filling is missing.")
         if plot_relative_error and not include_finite_dmrg:
             raise ValueError("Cached results do not include finite DMRG data required for plot_relative_error.")
     else:
@@ -1864,82 +1967,77 @@ def compare_U_values_with_dmrg(
         idmrg_fill_cache = np.full((len(u_list), len(v_list)), np.nan, dtype=float)
         finite_dmrg_fill_cache = np.full((len(u_list), len(v_list)), np.nan, dtype=float)
 
-        print("=" * 60)
-        print("Computing reference energies")
-        print("=" * 60)
-        
-        for u_idx, U in enumerate(u_list):
-            mu_0 = U / 2.0
+        mu_cache = np.full((len(u_list), len(v_list)), np.nan, dtype=float)
+        mu_source_Nc = max(cluster_sizes)
+
+        if set_filling is None:
+            for u_idx, U in enumerate(u_list):
+                mu0_guess = U / 2.0
+                for v_idx in range(len(v_list)):
+                    mu_cache[u_idx, v_idx] = mu0_guess
+        else:
+            print("=" * 60)
+            print(f"Solving mu from cluster filling (Nc={mu_source_Nc}, n_target={set_filling})")
+            print("=" * 60)
+
+            int_sep_ratio = ratio_map[mu_source_Nc]
+            super_cluster_size = None
+            if timing_recorder is not None:
+                try:
+                    clusters_tmp = generate_clusters(L, mu_source_Nc, int_sep_ratio, v_sep_ratio)
+                    super_cluster_size = supercluster_size_from_clusters(clusters_tmp)
+                except Exception:
+                    super_cluster_size = None
+
             for v_idx, V in enumerate(v_list):
-                # iDMRG
-                if include_idmrg:
+                for u_idx, U in enumerate(u_list):
+                    mu0_guess = U / 2.0
+                    physical_params = PhysicalParams(U=U, mu_0=mu0_guess, V=V, t=t)
+                    run_config = ClusterModelConfig(
+                        L=L,
+                        int_cluster_size=mu_source_Nc,
+                        cluster_separation_ratio=int_sep_ratio,
+                        V_separation_ratio=v_sep_ratio,
+                        ham_lib='quspin',
+                        physical_params=physical_params,
+                        model_bc='periodic',
+                        int_cluster_bc='periodic',
+                        super_cluster_bc='periodic',
+                        solver_method=solver_method,
+                        states_retained=states_retained,
+                    )
                     try:
                         meta = {
-                            "method": "iDMRG",
+                            "method": "cluster_mu",
                             "U": U,
                             "V": V,
                             "t": t,
                             "L": L,
-                            "Nc": None,
-                            "int_sep": None,
+                            "Nc": mu_source_Nc,
+                            "int_sep": int_sep_ratio,
                             "v_sep": v_sep_ratio,
-                            "super_cluster_size": None,
+                            "super_cluster_size": super_cluster_size,
                         }
-                        energy_dmrg, filling_dmrg, _ = time_call(
+                        system_expectations, _, mu_eff_avg = time_call(
                             timing_recorder,
                             meta,
-                            run_dmrg_method,
-                            U,
-                            mu_0,
-                            V,
-                            v_sep_ratio,
-                            t,
-                            L,
-                            chi,
+                            get_general_expectations,
+                            run_config,
+                            timing_recorder=timing_recorder,
+                            set_filling=set_filling,
+                            return_mu=True,
                         )
-                        dmrg_value = energy_dmrg + mu_0 * filling_dmrg
-                        idmrg_cache[u_idx, v_idx] = dmrg_value
-                        idmrg_fill_cache[u_idx, v_idx] = filling_dmrg
+                        if mu_eff_avg is None or not np.isfinite(mu_eff_avg):
+                            raise ValueError(f"Invalid mu from cluster filling: {mu_eff_avg}")
+                        mu_cache[u_idx, v_idx] = float(mu_eff_avg)
+
+                        energy, filling, _ = system_expectations
+                        energy_subtracted = (energy + mu0_guess * filling) / L
+                        cluster_results[(mu_source_Nc, V)][u_idx] = energy_subtracted
+                        cluster_fillings[(mu_source_Nc, V)][u_idx] = filling / L
                     except Exception as exc:
                         failed_calculations.append({
-                            'method': 'iDMRG',
-                            'params': {'U': U, 'V': V},
-                            'error': str(exc),
-                        })
-                
-                # Finite DMRG
-                if include_finite_dmrg:
-                    try:
-                        meta = {
-                            "method": "DMRG",
-                            "U": U,
-                            "V": V,
-                            "t": t,
-                            "L": L,
-                            "Nc": None,
-                            "int_sep": None,
-                            "v_sep": v_sep_ratio,
-                            "super_cluster_size": None,
-                        }
-                        energy_finite, _, filling_finite = time_call(
-                            timing_recorder,
-                            meta,
-                            get_gnd,
-                            L,
-                            chi,
-                            U,
-                            t,
-                            mu_0,
-                            V,
-                            v_sep_ratio,
-                        )
-                        energy_finite_per_site = energy_finite / L
-                        dmrg_value = energy_finite_per_site + mu_0 * filling_finite
-                        finite_dmrg_cache[u_idx, v_idx] = dmrg_value
-                        finite_dmrg_fill_cache[u_idx, v_idx] = filling_finite
-                    except Exception as exc:
-                        failed_calculations.append({
-                            'method': 'Finite DMRG',
+                            'method': f'cluster mu (Nc={mu_source_Nc})',
                             'params': {'U': U, 'V': V},
                             'error': str(exc),
                         })
@@ -1949,6 +2047,8 @@ def compare_U_values_with_dmrg(
         print("Running cluster calculations for each N_c")
         print("=" * 60)
         for Nc in tqdm(cluster_sizes, desc="Cluster sizes", ncols=80):
+            if set_filling is not None and Nc == mu_source_Nc:
+                continue
             int_sep_ratio = ratio_map[Nc]
             super_cluster_size = None
             if timing_recorder is not None:
@@ -1959,8 +2059,8 @@ def compare_U_values_with_dmrg(
                     super_cluster_size = None
             for v_idx, V in enumerate(v_list):
                 for u_idx, U in enumerate(u_list):
-                    mu_0 = U / 2.0
-                    physical_params = PhysicalParams(U=U, mu_0=mu_0, V=V, t=t)
+                    mu0_guess = U / 2.0
+                    physical_params = PhysicalParams(U=U, mu_0=mu0_guess, V=V, t=t)
                     run_config = ClusterModelConfig(
                         L=L,
                         int_cluster_size=Nc,
@@ -1986,14 +2086,133 @@ def compare_U_values_with_dmrg(
                             "v_sep": v_sep_ratio,
                             "super_cluster_size": super_cluster_size,
                         }
-                        system_expectations, _ = time_call(timing_recorder, meta, get_general_expectations, run_config, timing_recorder=timing_recorder)
+                        if set_filling is None:
+                            system_expectations, _ = time_call(
+                                timing_recorder,
+                                meta,
+                                get_general_expectations,
+                                run_config,
+                                timing_recorder=timing_recorder,
+                                mu_eff=float(mu_cache[u_idx, v_idx]),
+                            )
+                        else:
+                            system_expectations, _ = time_call(
+                                timing_recorder,
+                                meta,
+                                get_general_expectations,
+                                run_config,
+                                timing_recorder=timing_recorder,
+                                set_filling=set_filling,
+                            )
                         energy, filling, _ = system_expectations
-                        energy_subtracted = (energy + mu_0 * filling) / L
+                        energy_subtracted = (energy + mu0_guess * filling) / L
                         cluster_results[(Nc, V)][u_idx] = energy_subtracted
                         cluster_fillings[(Nc, V)][u_idx] = filling / L
                     except Exception as exc:
                         failed_calculations.append({
                             'method': f'cluster Nc={Nc}',
+                            'params': {'U': U, 'V': V},
+                            'error': str(exc),
+                        })
+
+        print("\n")
+        print("=" * 60)
+        print("Computing reference energies")
+        print("=" * 60)
+
+        for u_idx, U in enumerate(u_list):
+            for v_idx, V in enumerate(v_list):
+                mu_eff_value = float(mu_cache[u_idx, v_idx])
+
+                # iDMRG
+                if include_idmrg:
+                    try:
+                        if not np.isfinite(mu_eff_value):
+                            raise ValueError("Skipping iDMRG: mu was not determined from cluster data.")
+                        meta = {
+                            "method": "iDMRG",
+                            "U": U,
+                            "V": V,
+                            "t": t,
+                            "L": L,
+                            "Nc": None,
+                            "int_sep": None,
+                            "v_sep": v_sep_ratio,
+                            "super_cluster_size": None,
+                        }
+                        energy_dmrg, filling_dmrg, _ = time_call(
+                            timing_recorder,
+                            meta,
+                            run_dmrg_method,
+                            U,
+                            mu_eff_value,
+                            V,
+                            v_sep_ratio,
+                            t,
+                            L,
+                            chi,
+                        )
+                        dmrg_value = energy_dmrg + mu_eff_value * filling_dmrg
+                        idmrg_cache[u_idx, v_idx] = dmrg_value
+                        idmrg_fill_cache[u_idx, v_idx] = filling_dmrg
+                    except Exception as exc:
+                        failed_calculations.append({
+                            'method': 'iDMRG',
+                            'params': {'U': U, 'V': V},
+                            'error': str(exc),
+                        })
+
+                # Finite DMRG
+                if include_finite_dmrg:
+                    try:
+                        meta = {
+                            "method": "DMRG",
+                            "U": U,
+                            "V": V,
+                            "t": t,
+                            "L": L,
+                            "Nc": None,
+                            "int_sep": None,
+                            "v_sep": v_sep_ratio,
+                            "super_cluster_size": None,
+                        }
+                        if dmrg_fixed_filling:
+                            energy_finite, _, filling_finite = time_call(
+                                timing_recorder,
+                                meta,
+                                get_gnd_fixed_filling,
+                                L,
+                                chi,
+                                set_filling,
+                                U,
+                                t,
+                                V,
+                                v_sep_ratio,
+                            )
+                            energy_finite_per_site = energy_finite / L
+                            dmrg_value = energy_finite_per_site
+                        else:
+                            if not np.isfinite(mu_eff_value):
+                                raise ValueError("Skipping finite DMRG: mu was not determined from cluster data.")
+                            energy_finite, _, filling_finite = time_call(
+                                timing_recorder,
+                                meta,
+                                get_gnd,
+                                L,
+                                chi,
+                                U,
+                                t,
+                                mu_eff_value,
+                                V,
+                                v_sep_ratio,
+                            )
+                            energy_finite_per_site = energy_finite / L
+                            dmrg_value = energy_finite_per_site + mu_eff_value * filling_finite
+                        finite_dmrg_cache[u_idx, v_idx] = dmrg_value
+                        finite_dmrg_fill_cache[u_idx, v_idx] = filling_finite
+                    except Exception as exc:
+                        failed_calculations.append({
+                            'method': 'Finite DMRG',
                             'params': {'U': U, 'V': V},
                             'error': str(exc),
                         })
@@ -2028,6 +2247,9 @@ def compare_U_values_with_dmrg(
         timestamp=timestamp,
         show_plots=show_plots,
         save_html=save_html,
+        set_filling=set_filling,
+        mu_source_Nc=max(cluster_sizes) if set_filling is not None else None,
+        dmrg_fixed_filling=dmrg_fixed_filling,
         plot_relative_error=plot_relative_error,
     )
     fig = figures[0] if figures else None
@@ -2045,6 +2267,7 @@ def compare_U_values_with_dmrg(
         Nc: {V: cluster_fillings[(Nc, V)].tolist() for V in v_list}
         for Nc in cluster_sizes
     }
+    mu_values_serialized = mu_cache.tolist() if 'mu_cache' in locals() else None
     results_payload = {
         'cluster_sizes': cluster_sizes,
         'U_values': u_list,
@@ -2055,6 +2278,7 @@ def compare_U_values_with_dmrg(
         'finite_dmrg_energies': finite_dmrg_cache.tolist(),
         'idmrg_fillings': idmrg_fill_cache.tolist(),
         'finite_dmrg_fillings': finite_dmrg_fill_cache.tolist(),
+        'mu_values': mu_values_serialized,
         'int_sep_ratios': {Nc: ratio_map[Nc] for Nc in cluster_sizes},
         'parameters': {
             'v_sep_ratio': v_sep_ratio,
@@ -2066,6 +2290,8 @@ def compare_U_values_with_dmrg(
             'include_idmrg': include_idmrg,
             'include_finite_dmrg': include_finite_dmrg,
             'plot_relative_error': plot_relative_error,
+            'set_filling': set_filling,
+            'dmrg_fixed_filling': dmrg_fixed_filling,
         },
         'artifacts': saved_paths,
         'failures': failed_calculations,

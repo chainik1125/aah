@@ -478,26 +478,28 @@ if __name__ == "__main__":
 
 
     fig, results = compare_U_values_with_dmrg(
-        v_sep_ratio=(1, 2),
-        int_sep_ratios={2:(1,2)},
-        cluster_sizes=[2],
-        U_values=[0,1e-1,5e-1,1,2],
-        V_values=[1e-6],
-        L=48,
+        v_sep_ratio=(1, 4),
+        int_sep_ratios=int_sep_ratios,
+        cluster_sizes=cluster_sizes,
+        U_values=U_values,
+        V_values=V_values,
+        L=80,
         t=1.0,
         solver_method='sparse_ED',
         states_retained=6,
         chi=32,
         log_yaxis=False,  # Plot energies on linear scale
-        include_idmrg=False,
+        include_idmrg=True,
         include_finite_dmrg=True,
         save_data=False,
         save_html=False,
         show_plots=True,
         include_timing=False,
         include_timing_plot=False,
-        plot_relative_error=False,
-        results=None
+        plot_relative_error=True,
+        results=data_path,  # Load existing results
+        set_filling=None,
+        dmrg_fixed_filling=None
     )
 
     

@@ -58,6 +58,7 @@ if [[ ! -f "$VENV_DIR/.deps_installed" ]]; then
             pushd "$PROJECT_ROOT/aah" >/dev/null
             "$VENV_DIR/bin/python" -m pip install -e .
             popd >/dev/null
+            "$VENV_DIR/bin/python" -m pip install matplotlib
             touch "$VENV_DIR/.deps_installed"
         fi
     } 9>"$LOCKFILE"
@@ -65,7 +66,8 @@ fi
 
 source "$VENV_DIR/bin/activate"
 
-TASK_ID=${SLURM_ARRAY_TASK_ID:-0}
+export TASK_ID=${SLURM_ARRAY_TASK_ID:-0}
+export TIMING_CSV="${TIMING_CSV:-$PARTIAL_DIR/timings_task${TASK_ID}.csv}"
 
 read PARAMS_FILE OUT_PATH <<EOF
 $("$VENV_DIR/bin/python" - <<'PY'

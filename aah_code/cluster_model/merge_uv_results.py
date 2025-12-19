@@ -11,6 +11,65 @@ from pathlib import Path
 import numpy as np
 
 
+def _write_cluster_timing_svg(timings, plots_dir: Path, filename: str = "sep_uv_timings.svg") -> Path | None:
+    if not timings:
+        return None
+
+    # We only want per-supercluster diagonalisation timings.
+    points = []
+    for rec in timings:
+        if rec.get("method") != "cluster_ED_supercluster":
+            continue
+        try:
+            sc_size = float(rec.get("super_cluster_size", np.nan))
+            elapsed = float(rec.get("elapsed_sec", np.nan))
+        except Exception:
+            continue
+        if not (np.isfinite(sc_size) and np.isfinite(elapsed)):
+            continue
+        points.append((sc_size, elapsed))
+
+    if not points:
+        return None
+
+    # Aggregate with mean and min/max errorbars.
+    agg = {}
+    for sc_size, elapsed in points:
+        agg.setdefault(sc_size, []).append(elapsed)
+
+    xs = sorted(agg.keys())
+    means = [float(np.mean(agg[x])) for x in xs]
+    mins = [float(np.min(agg[x])) for x in xs]
+    maxs = [float(np.max(agg[x])) for x in xs]
+    err_down = [m - lo for m, lo in zip(means, mins)]
+    err_up = [hi - m for hi, m in zip(maxs, means)]
+
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except Exception as exc:
+        print(f"Warning: skipping timing SVG (matplotlib unavailable): {exc}")
+        return None
+
+    plots_dir.mkdir(parents=True, exist_ok=True)
+    svg_path = plots_dir / filename
+
+    plt.figure(figsize=(8, 5))
+    plt.errorbar(xs, means, yerr=[err_down, err_up], fmt="-o", capsize=4)
+    plt.xlabel("Supercluster size (sites)")
+    plt.ylabel("Elapsed time per supercluster (s)")
+    plt.title("Cluster ED runtime per supercluster")
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(svg_path, format="svg")
+    plt.close()
+
+    print(f"Saved timing SVG to {svg_path}")
+    return svg_path
+
+
 def parse_args():
     p = argparse.ArgumentParser(description="Merge partial UV result pickles.")
     p.add_argument("--partials", required=True, help="Glob pattern for partial pickles (e.g., 'large_files/partials/*.pkl').")
@@ -139,6 +198,10 @@ def main():
     with out_path.open("wb") as fh:
         pickle.dump(merged, fh)
     print(f"Saved merged results to {out_path}")
+
+    # Also create a compact timing SVG next to the energy SVG output location.
+    plots_dir = out_path.parent / "plots"
+    _write_cluster_timing_svg(merged.get("timings", []), plots_dir=plots_dir)
 
 
 if __name__ == "__main__":

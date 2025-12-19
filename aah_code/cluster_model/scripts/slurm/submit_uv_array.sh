@@ -14,6 +14,8 @@ V_LIST=${V_LIST:-"1e-6 1 2 3 5 10"}
 T_VALUE=${T_VALUE:-1.0}
 L_VALUE=${L_VALUE:-120}
 CHI_VALUE=${CHI_VALUE:-64}
+# Target filling per site for fixed-filling workflows. Leave empty/"none" for default (grand-canonical).
+SET_FILLING=${SET_FILLING:-""}
 SOLVER_METHOD=${SOLVER_METHOD:-sparse_ED}
 STATES_RETAINED=${STATES_RETAINED:-6}
 V_SEP_RATIO=${V_SEP_RATIO:-"1,2"}
@@ -34,6 +36,7 @@ RUN_SCRIPT="$SCRIPT_DIR/run_uv_array.sbatch"
 export MANIFEST_PATH PARTIAL_DIR PROJECT_ROOT
 # Export sweep parameters so the Python block sees the values defined above.
 export U_LIST V_LIST T_VALUE L_VALUE CHI_VALUE SOLVER_METHOD STATES_RETAINED
+export SET_FILLING
 export V_SEP_RATIO INT_SEP_RATIOS CLUSTER_SIZES INCLUDE_IDMRG INCLUDE_FINITE_DMRG
 export INCLUDE_TIMING INCLUDE_TIMING_PLOT JOB_NAME
 
@@ -66,6 +69,12 @@ INCLUDE_IDMRG = get_env("INCLUDE_IDMRG", "true").lower() == "true"
 INCLUDE_FINITE_DMRG = get_env("INCLUDE_FINITE_DMRG", "true").lower() == "true"
 INCLUDE_TIMING = get_env("INCLUDE_TIMING", "false").lower() == "true"
 INCLUDE_TIMING_PLOT = get_env("INCLUDE_TIMING_PLOT", "false").lower() == "true"
+SET_FILLING_RAW = get_env("SET_FILLING", "").strip()
+if SET_FILLING_RAW.lower() in ("", "none", "null"):
+    SET_FILLING = None
+else:
+    SET_FILLING = float(SET_FILLING_RAW)
+DMRG_FIXED_FILLING = SET_FILLING is not None
 
 int_sep_env = get_env("INT_SEP_RATIOS", "{2:[1,2]}")
 try:
@@ -114,6 +123,8 @@ for U in U_LIST:
             "include_finite_dmrg": INCLUDE_FINITE_DMRG,
             "include_timing": INCLUDE_TIMING,
             "include_timing_plot": INCLUDE_TIMING_PLOT,
+            "set_filling": SET_FILLING,
+            "dmrg_fixed_filling": DMRG_FIXED_FILLING,
         })
 
 manifest_path.write_text(json.dumps(manifest, indent=2))

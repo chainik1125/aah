@@ -45,6 +45,14 @@ def main():
     include_finite_dmrg = bool(params.get("include_finite_dmrg", True))
     include_timing = bool(params.get("include_timing", False))
     include_timing_plot = bool(params.get("include_timing_plot", False))
+    set_filling = params.get("set_filling", None)
+    if set_filling is not None:
+        set_filling = float(set_filling)
+    dmrg_fixed_filling = params.get("dmrg_fixed_filling", None)
+    if dmrg_fixed_filling is None:
+        dmrg_fixed_filling = set_filling is not None
+    else:
+        dmrg_fixed_filling = bool(dmrg_fixed_filling)
 
     fig, results = compare_U_values_with_dmrg(
         v_sep_ratio=v_sep_ratio,
@@ -61,6 +69,8 @@ def main():
         include_finite_dmrg=include_finite_dmrg,
         include_timing=include_timing,
         include_timing_plot=include_timing_plot,
+        set_filling=set_filling,
+        dmrg_fixed_filling=dmrg_fixed_filling,
         save_html=False,
         save_data=False,
         show_plots=False,

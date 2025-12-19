@@ -88,7 +88,15 @@ def get_general_spectra(run_config:ClusterModelConfig,return_ham:bool=False,timi
 		return k_points,energy_spectrum,number_spectrum,spin_spectrum
 
 
-def get_general_expectations(run_config:ClusterModelConfig, timing_recorder=None):
+def get_general_expectations(
+	run_config: ClusterModelConfig,
+	timing_recorder=None,
+	*,
+	set_filling: float | None = None,
+	temperature: float = 1e-2,
+	mu_eff: float | None = None,
+	return_mu: bool = False,
+):
 
 	spectra_4tuple=get_general_spectra(run_config, timing_recorder=timing_recorder)
 	#NOTE! Now I have the spectra outputted as pooling the total energies across number sectors
@@ -100,8 +108,15 @@ def get_general_expectations(run_config:ClusterModelConfig, timing_recorder=None
 	
 	full_spectrum_obj=FullSpectrum(None,None,physical_params,None)
 	
-	system_expectations,cluster_expectations=full_spectrum_obj.get_cluster_thermodynamic_expectations(spectra_4tuple)
+	system_expectations,cluster_expectations=full_spectrum_obj.get_cluster_thermodynamic_expectations(
+		spectra_4tuple,
+		temperature=temperature,
+		set_filling=set_filling,
+		mu_eff=mu_eff,
+	)
 	
+	if return_mu:
+		return system_expectations,cluster_expectations,getattr(full_spectrum_obj,'last_mu_eff',None)
 	return system_expectations,cluster_expectations
 
 
