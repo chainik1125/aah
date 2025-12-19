@@ -43,16 +43,44 @@ mkdir -p logs "$PARTIAL_DIR"
 PYTHON_BIN=python3
 # Use a clean project-local venv for Python deps (including quspin).
 VENV_DIR="$PROJECT_ROOT/.venv"
-LOCKFILE="$VENV_DIR/pip.lock"
+LOCKFILE="$PROJECT_ROOT/.venv.lock"
+
+need_setup=0
+if [[ ! -x "$VENV_DIR/bin/python" ]]; then
+    need_setup=1
+elif [[ ! -f "$VENV_DIR/.deps_installed" ]]; then
+    need_setup=1
+elif ! "$VENV_DIR/bin/python" -c "import matplotlib" >/dev/null 2>&1; then
+    need_setup=1
+fi
 
 # Create venv and install dependencies once, under a lock to avoid races across array tasks.
-if [[ ! -f "$VENV_DIR/.deps_installed" ]]; then
-    mkdir -p "$VENV_DIR"
+# Avoid deleting an in-use venv on NFS (can cause "Directory not empty" errors).
+if [[ "$need_setup" -eq 1 ]]; then
     {
         flock 9
-        if [[ ! -f "$VENV_DIR/.deps_installed" ]]; then
-            rm -rf "$VENV_DIR"
-            "$PYTHON_BIN" -m venv "$VENV_DIR"
+
+        need_setup_locked=0
+        if [[ ! -x "$VENV_DIR/bin/python" ]]; then
+            need_setup_locked=1
+        elif [[ ! -f "$VENV_DIR/.deps_installed" ]]; then
+            need_setup_locked=1
+        elif ! "$VENV_DIR/bin/python" -c "import matplotlib" >/dev/null 2>&1; then
+            need_setup_locked=1
+        fi
+
+        if [[ "$need_setup_locked" -eq 1 ]]; then
+            if [[ ! -x "$VENV_DIR/bin/python" ]]; then
+                if [[ -d "$VENV_DIR" ]]; then
+                    BACKUP_DIR="${VENV_DIR}.old.${SLURM_JOB_ID:-$$}.${SLURM_ARRAY_JOB_ID:-0}.${SLURM_ARRAY_TASK_ID:-0}.$(date +%s)"
+                    echo "Existing venv at $VENV_DIR looks invalid; moving aside to $BACKUP_DIR"
+                    mv "$VENV_DIR" "$BACKUP_DIR"
+                    rm -rf "$BACKUP_DIR" 2>/dev/null || echo "Warning: could not fully remove $BACKUP_DIR (likely NFS .nfs files); leaving it."
+                fi
+                echo "Creating virtual environment at $VENV_DIR"
+                "$PYTHON_BIN" -m venv "$VENV_DIR"
+            fi
+
             source "$VENV_DIR/bin/activate"
             "$VENV_DIR/bin/python" -m pip install --upgrade pip setuptools wheel
             pushd "$PROJECT_ROOT/aah" >/dev/null

@@ -596,15 +596,7 @@ class FullSpectrum():
 		else:
 			return k_points,energy_spectrum,number_spectrum,spin_spectrum
 	
-	def set_mu_fix_filling(
-		self,
-		total_energy_spectrum: np.ndarray,
-		total_number_spectrum: np.ndarray,
-		total_spin_spectrum: np.ndarray,
-		target_filling: Union[float, None] = None,
-		temperature: Union[None, float] = 1e-8,
-		mu_eff: Union[float, None] = None,
-	):
+	def set_filling_for_supercluster(self,target_filling:float,total_energy_spectrum:np.ndarray,total_number_spectrum:np.ndarray,total_spin_spectrum:np.ndarray,temperature:Union[None,float]=1e-8):
 		"""
 		Docstring for set_filling_for_supercluster
 		
@@ -619,150 +611,171 @@ class FullSpectrum():
 			cluster_number_expectations: shape (states_retained)
 			ground_state_spins: Spin expectations for the ground state
 		"""
-		
-		if temperature is None:
-			temperature = 1e-12
-		if temperature <= 0:
+
+		temperature_eff = float(temperature) if temperature is not None else 1e-12
+		if temperature_eff <= 0:
 			raise ValueError(f"temperature must be > 0, got {temperature}")
 
-		num_cluster_sites = total_number_spectrum.shape[-1]
-		number_spectrum_site_sum = total_number_spectrum.sum(axis=-1)  # (num_superclusters, states_retained)
+		energy_spectrum = np.asarray(total_energy_spectrum)
+		number_spectrum = np.asarray(total_number_spectrum)
+		spin_spectrum = np.asarray(total_spin_spectrum)
 
-		# 1) Expectation values at a specified chemical potential mu_eff.
-		def calculate_observable(mu_eff_value: Union[float, np.ndarray], observable_spectrum: np.ndarray) -> np.ndarray:
-			mu_eff_value_arr = np.asarray(mu_eff_value, dtype=float)
-			if mu_eff_value_arr.ndim == 0:
-				mu_delta = float(mu_eff_value_arr) - self.physical_params.mu_0
-			else:
-				if mu_eff_value_arr.shape != (number_spectrum_site_sum.shape[0],):
-					raise ValueError(
-						f"mu_eff must be scalar or shape {(number_spectrum_site_sum.shape[0],)}, got {mu_eff_value_arr.shape}"
-					)
-				mu_delta = mu_eff_value_arr[:, np.newaxis] - self.physical_params.mu_0
-			beta = 1.0 / float(temperature)
-			gcp_energies = total_energy_spectrum - (mu_delta * number_spectrum_site_sum)
+		num_cluster_sites = number_spectrum.shape[-1]
+		number_spectrum_site_sum = number_spectrum.sum(axis=-1)  # (num_superclusters, states_retained)
+
+		def probabilities(mu_eff: float) -> np.ndarray:
+			mu_delta = mu_eff - self.physical_params.mu_0
+			beta = 1.0 / temperature_eff
+			gcp_energies = energy_spectrum - (mu_delta * number_spectrum_site_sum)
 			log_weights = -beta * gcp_energies
 			shift = np.max(log_weights, axis=-1, keepdims=True)
 			weights = np.exp(log_weights - shift)
 			Z = np.sum(weights, axis=-1, keepdims=True)
-			numerator = np.sum(weights * observable_spectrum, axis=-1, keepdims=True)
-			return (numerator / Z)[:, 0]
-		
-		# 2) Optionally solve for mu by targeting a per-site filling, then average mu over superclusters.
-		mu_eff_by_supercluster = None
-		mu_eff_used = self.physical_params.mu_0
+			return weights / Z
 
-		if mu_eff is not None:
-			mu_eff_used = float(mu_eff)
-		elif target_filling is not None:
-			target_filling = float(target_filling)
-			if not np.isfinite(target_filling):
-				raise ValueError(f"target_filling must be finite, got {target_filling}")
-			beta = 1.0 / float(temperature)
+		def filling_scalar(mu_eff: float) -> float:
+			probs = probabilities(mu_eff)
+			n_expect_k = np.sum(probs * number_spectrum_site_sum, axis=-1)  # (num_superclusters,)
+			filling_k = n_expect_k / num_cluster_sites
+			return float(np.mean(filling_k))
 
-			def bracket_monotone_root(g, x0: float, step0: float = 1.0, max_expand: int = 60):
-				g0 = g(x0)
-				if g0 == 0:
-					return x0, x0
-				step = step0
-				if g0 > 0:
-					# Need smaller x.
-					x_hi = x0
-					g_hi = g0
-					for _ in range(max_expand):
-						x_lo = x0 - step
-						g_lo = g(x_lo)
-						if g_lo <= 0:
-							return x_lo, x_hi
-						step *= 2.0
-				else:
-					# Need larger x.
-					x_lo = x0
-					g_lo = g0
-					for _ in range(max_expand):
-						x_hi = x0 + step
-						g_hi = g(x_hi)
-						if g_hi >= 0:
-							return x_lo, x_hi
-						step *= 2.0
-				raise ValueError("Failed to bracket monotone root (target filling likely out of range).")
+		def mu_for_filling(
+			filling_target: float,
+			mu_lo: float,
+			mu_hi: float,
+			xtol: float = 1e-7,
+			maxiter: int = 200,
+			max_expand: int = 50,
+		):
+			def g(mu: float) -> float:
+				return filling_scalar(mu) - filling_target
 
-			num_superclusters = total_energy_spectrum.shape[0]
-			mu_eff_by_supercluster = np.empty(num_superclusters, dtype=float)
-			mu0_guess = float(self.physical_params.mu_0)
-			xtol = 1e-7
-			maxiter = 200
+			g_lo = g(mu_lo)
+			g_hi = g(mu_hi)
 
-			for sc_idx in range(num_superclusters):
-				energies_sc = total_energy_spectrum[sc_idx]
-				n_states_sc = number_spectrum_site_sum[sc_idx]
-				min_fill = float(np.min(n_states_sc) / num_cluster_sites)
-				max_fill = float(np.max(n_states_sc) / num_cluster_sites)
-				if target_filling < min_fill or target_filling > max_fill:
-					raise ValueError(
-						f"Target filling {target_filling} out of range for supercluster {sc_idx}: "
-						f"[{min_fill}, {max_fill}]"
-					)
+			expand_step = (mu_hi - mu_lo) if (mu_hi != mu_lo) else 1.0
+			expand_iters = 0
+			while g_lo > 0 and expand_iters < max_expand:
+				mu_lo -= expand_step
+				expand_step *= 2.0
+				g_lo = g(mu_lo)
+				expand_iters += 1
 
-				def g(mu_value: float) -> float:
-					mu_delta = mu_value - mu0_guess
-					gcp_energies_sc = energies_sc - (mu_delta * n_states_sc)
-					log_weights_sc = -beta * gcp_energies_sc
-					shift_sc = float(np.max(log_weights_sc))
-					weights_sc = np.exp(log_weights_sc - shift_sc)
-					Z_sc = float(np.sum(weights_sc))
-					n_expect_sc = float(np.sum(weights_sc * n_states_sc) / Z_sc)
-					return (n_expect_sc / num_cluster_sites) - target_filling
+			expand_step = (mu_hi - mu_lo) if (mu_hi != mu_lo) else 1.0
+			expand_iters = 0
+			while g_hi < 0 and expand_iters < max_expand:
+				mu_hi += expand_step
+				expand_step *= 2.0
+				g_hi = g(mu_hi)
+				expand_iters += 1
 
-				mu_lo, mu_hi = bracket_monotone_root(g, mu0_guess)
-				mu_eff_by_supercluster[sc_idx] = float(bisect(g, mu_lo, mu_hi, xtol=xtol, maxiter=maxiter))
+			if g_lo > 0 or g_hi < 0:
+				raise ValueError(
+					"mu bracket does not contain target filling: "
+					f"g(mu_lo)={g_lo:.6g}, g(mu_hi)={g_hi:.6g}, "
+					f"f(mu_lo)={filling_scalar(mu_lo):.6g}, f(mu_hi)={filling_scalar(mu_hi):.6g}, "
+					f"target={filling_target}"
+				)
 
-			mu_eff_used = float(np.mean(mu_eff_by_supercluster))
-			logger.info(f"mu_eff(avg over {num_superclusters} superclusters) = {mu_eff_used}")
-		
-		
-		self.last_mu_eff = mu_eff_used
-		self.last_mu_eff_by_supercluster = mu_eff_by_supercluster
-		self.last_target_filling = target_filling
-		self.last_temperature = temperature
+			mu = bisect(g, mu_lo, mu_hi, xtol=xtol, maxiter=maxiter)
+			return mu, mu_lo, mu_hi
 
-		# 3) Thermodynamic expectations at the selected mu.
-		mu_for_expectations: Union[float, np.ndarray] = mu_eff_used
-		if mu_eff is None and mu_eff_by_supercluster is not None:
-			mu_for_expectations = mu_eff_by_supercluster
-		system_energy_expectation = calculate_observable(mu_for_expectations, total_energy_spectrum).sum()
-		system_number_expectation = calculate_observable(mu_for_expectations, number_spectrum_site_sum).sum()
-		
-		spin_multiplier=np.array([1,-1])#to give +1 to up spins and -1 to down spins.
-		#spin_spectrum
-		spin_input=total_spin_spectrum*spin_multiplier[np.newaxis,:,np.newaxis,np.newaxis]
-		summed_spin_input=spin_input.sum(axis=1)
-		site_summed_spin_input=summed_spin_input.sum(axis=-1)
-		system_spin_expectation = calculate_observable(mu_for_expectations, site_summed_spin_input).sum()
-		
-		return system_energy_expectation,system_number_expectation,system_spin_expectation
+		maximum_filling_energy = 2 * self.physical_params.hopping + self.physical_params.U + 2 * self.physical_params.V
+		minimum_filling_energy = -2 * self.physical_params.hopping - 2 * self.physical_params.V
+		mu_eff, mu_lo, mu_hi = mu_for_filling(float(target_filling), minimum_filling_energy, maximum_filling_energy)
+
+		logger.info(f"mu_eff={mu_eff} (mu_lo={mu_lo}, mu_hi={mu_hi})")
+
+		probs = probabilities(mu_eff)
+		energy_expect_k = np.sum(probs * energy_spectrum, axis=-1)  # (num_superclusters,)
+		number_expect_k = np.sum(probs * number_spectrum_site_sum, axis=-1)  # (num_superclusters,)
+
+		if spin_spectrum.ndim == 4 and spin_spectrum.shape[0] == 2:
+			spin_multiplier = np.array([1.0, -1.0])[:, np.newaxis, np.newaxis, np.newaxis]
+			spin_sum = np.sum(spin_spectrum * spin_multiplier, axis=(0, 3))  # (num_superclusters, states_retained)
+		elif spin_spectrum.ndim == 3:
+			spin_sum = spin_spectrum.sum(axis=-1)  # (num_superclusters, states_retained)
+		else:
+			raise ValueError(f"Unexpected total_spin_spectrum shape: {spin_spectrum.shape}")
+
+		spin_expect_k = np.sum(probs * spin_sum, axis=-1)  # (num_superclusters,)
+
+		system_energy_expectation = float(np.sum(energy_expect_k))
+		system_number_expectation = float(np.sum(number_expect_k))
+		system_spin_expectation = float(np.sum(spin_expect_k))
+
+		return system_energy_expectation, system_number_expectation, system_spin_expectation
 	
-	def get_cluster_thermodynamic_expectations(
-		self,
-		full_spectrum_4tuple: tuple,
-		temperature: float = 1e-2,
-		set_filling: Union[float, None] = None,
-		mu_eff: Union[float, None] = None,
-	):
+	def get_cluster_thermodynamic_expectations(self,full_spectrum_4tuple:tuple,temperature:float=1e-2,set_filling:Union[float,None]=None):
 		cluster_energy_expectations=[]
 		cluster_number_expectations=[]
 		cluster_spin_expectations=[]
 		
 		k_points,full_energy_spectrum,full_number_spectrum,full_spin_spectrum=full_spectrum_4tuple
+		if True:
+			system_energy,system_number,system_spin=self.set_filling_for_supercluster(set_filling,full_energy_spectrum,full_number_spectrum,full_spin_spectrum,temperature)
+			print(f'Set filling to {set_filling}, got number expectation {system_number}')
+			print(f'energy expectation: {system_energy}')
+			print(f'spin expectation: {system_spin}')
+		exit()
+		# This code actually seems unnecessary - I already have the spectrum, why do I need to go through reconstructing
+		for i,k_point in enumerate(k_points):
+			energy_spectrum=full_energy_spectrum[i]
+			number_spectrum=full_number_spectrum[i]
+			if np.asarray(full_spin_spectrum).ndim == 4 and np.asarray(full_spin_spectrum).shape[0] == 2:
+				spin_spectrum=full_spin_spectrum[:, i, :, :]
+			else:
+				spin_spectrum=full_spin_spectrum[i]
+			
+					
+
+		# I'm going to unify this logic by just dropping an eps into the temperature if it's None
+		if temperature is None:
+			#logger.info('Temperature is None - returning zero temperature expectations')
+			
+			cluster_energy_argmin=np.argmin(energy_spectrum,axis=-1)
+			
+			#order the energies in case they're not already ordered
+			energy_order=np.argsort(energy_spectrum,axis=-1)
+			energy_spectrum = energy_spectrum[energy_order]
+			
+			#Note that the number spectrum is site resolved, so has shape (states_retained, sites in supercluster)
+			number_spectrum = number_spectrum[energy_order]
+			
+			spin_spectrum = spin_spectrum[:, energy_order, :]
+			
+			cluster_energy_expectations.append(energy_spectrum)
+			cluster_number_expectations.append(number_spectrum)
+			
+			spin_multiplier=np.array([1,-1])#to give +1 to up spins and -1 to down spins.
+			# spin_spectrum[i] has shape: (spins, eigenstates, sites in supercluster) i.e. (2,6,4) if N_c=2 and 
+			# We need to extract the ground state and sum over sites for each spin type
+			
+			ground_state_spins = spin_spectrum[:, :, :]  # shape (2, 4)
+			spin_polarization = np.sum(ground_state_spins * spin_multiplier[:,np.newaxis,np.newaxis ], axis=0)  # sum over spins and sites
+			cluster_spin_expectations.append(spin_polarization)
+		else:
+			#logger.info(f'Temperature is {temperature} - returning temperature dependent expectations')
+			beta=1/temperature
+			#TODO:CHECK!! I think you DONT include mu_0 N if you already added this 
+			#term to the Hamiltonian when finding the energies
+			sum_partition_function=np.sum(np.exp(-beta*(energy_spectrum)))
+			cluster_energy_expectations.append(np.sum(energy_spectrum*np.exp(-beta*energy_spectrum))/sum_partition_function)
+			cluster_number_expectations.append(np.sum(number_spectrum*np.exp(-beta*energy_spectrum))/sum_partition_function)
+			spin_multiplier=np.array([1,-1])#to give +1 to up spins and -1 to down spins.
+			# Handle temperature-dependent case with proper broadcasting
+			boltzmann_weights = np.exp(-beta*energy_spectrum)  # shape (256,)
+			# spin_spectrum has shape (2, 256, 4), multiply by weights and sum
+			weighted_spins = np.sum(spin_spectrum * boltzmann_weights[np.newaxis, :, np.newaxis], axis=1)  # sum over eigenstates, shape (2, 4)
+			spin_polarization = np.sum(weighted_spins * spin_multiplier[:, np.newaxis], axis=(0,1))  # sum over spins and sites
+			cluster_spin_expectations.append(spin_polarization / sum_partition_function)
+
+		# else:
+		# 	system_energy=np.sum(cluster_energy_expectations)
+		# 	system_number=np.sum(cluster_number_expectations)
+		# 	system_spin=np.sum(cluster_spin_expectations)
 		
-		system_energy,system_number,system_spin=self.set_mu_fix_filling(
-			full_energy_spectrum,
-			full_number_spectrum,
-			full_spin_spectrum,
-			set_filling,
-			temperature,
-			mu_eff=mu_eff,
-		)
+		# exit()
 		
 		system_expectations=(system_energy,system_number,system_spin)
 		cluster_expectations=(cluster_energy_expectations,cluster_number_expectations,cluster_spin_expectations)
@@ -2460,7 +2473,8 @@ def expectations_plot_combined(physical_params: HamiltonianParams):
 		dmrg_totals[component] = np.sum(dmrg_dict[component])
 		mismatched_totals[component] = np.sum(mismatched_cluster_dict[component])
 	
-		print(f"mismatched components: {np.array(mismatched_totals.values()).sum()},total energy: {mismatched_totals['total_energy'].sum()}")
+	print(f"mismatched components: {np.array(mismatched_totals.values()).sum()},total energy: {mismatched_totals['total_energy'].sum()}")
+	exit()
 
 	methods = ['DMRG', 'Mismatched Cluster']
 	colors = {'hopping_energy': 'lightblue', 'v_energy': 'lightgreen', 'interaction_energy': 'lightcoral'}
@@ -2538,7 +2552,7 @@ if __name__ == "__main__":
 	#fig.show()
 	
 
-# exit('testing expectations')
+	exit('testing expectations')
 	fig=make_subplots(rows=1,cols=1)
 	fig.add_trace(
 		go.Scatter(
@@ -2557,7 +2571,7 @@ if __name__ == "__main__":
 	)
 	fig.show()
 
-# exit("Testing operator expectations")
+	exit("Testing operator expectations")
 	compare_all_methods_vs_U(U_values,V=5,t=1).show()
 	#fig.write_html("quick_spectrum_test.html")
 	#print("Quick spectrum test saved as 'quick_spectrum_test.html'")
@@ -2574,7 +2588,7 @@ if __name__ == "__main__":
 	except Exception as e:
 		print(f"Heatmap function test failed: {e}")
 	
-# exit('testing 4 site')
+	exit('testing 4 site')
 
 	#test the full spectrum code
 	lattice_points=10

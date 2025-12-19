@@ -35,8 +35,10 @@ class RealSpaceHubbard1D(CouplingMPOModel, NearestNeighborModel):
 
 	# Initialize spin-1/2 fermion d.o.f. on each site
 	def init_sites(self, model_params):
-		# Remove both particle number and spin conservation to allow DMRG to explore all sectors
-		site = tp.networks.site.SpinHalfFermionSite(cons_N=None, cons_Sz=None)
+		# Default: remove both particle number and spin conservation to allow DMRG to explore all sectors.
+		cons_N = model_params.get('cons_N', None)
+		cons_Sz = model_params.get('cons_Sz', None)
+		site = tp.networks.site.SpinHalfFermionSite(cons_N=cons_N, cons_Sz=cons_Sz)
 		return site
 
 	# Set 1D lattice
@@ -117,6 +119,87 @@ def get_gnd(L, chi, U=1, t=1, mu=0, V=0, V_sep=None):
 	N_down = np.mean([psi.expectation_value('Nd', i) for i in range(L)])
 	filling = N_up + N_down
 	
+	return E, psi, filling
+
+
+def get_gnd_fixed_filling(L, chi, filling_target, U=1, t=1, V=0, V_sep=None):
+	"""
+	Finite DMRG in the canonical ensemble (fixed total particle number).
+
+	Args:
+		L: Number of sites.
+		chi: Max bond dimension.
+		filling_target: Target filling per site (0 <= n <= 2).
+		U, t, V, V_sep: Model parameters (same conventions as get_gnd).
+
+	Returns:
+		(E, psi, filling): Total ground state energy, MPS, and measured filling per site.
+	"""
+	if filling_target is None:
+		raise ValueError("filling_target must be provided for fixed-filling DMRG.")
+
+	filling_target = float(filling_target)
+	if not np.isfinite(filling_target):
+		raise ValueError(f"filling_target must be finite, got {filling_target!r}.")
+	if filling_target < -1e-12 or filling_target > 2.0 + 1e-12:
+		raise ValueError(f"filling_target must be between 0 and 2 (per site), got {filling_target}.")
+
+	N_target_float = filling_target * L
+	N_target = int(round(N_target_float))
+	N_target = max(0, min(2 * L, N_target))
+
+	# Use an (almost) unpolarized initial state: N_up ~= N_down.
+	N_up_target = N_target // 2
+	N_down_target = N_target - N_up_target
+
+	min_double_occupancies = max(0, N_target - L)
+	if min_double_occupancies > min(N_up_target, N_down_target):
+		raise ValueError(
+			f"Cannot realize N_target={N_target} on L={L} with N_up={N_up_target}, N_down={N_down_target}."
+		)
+
+	N_full = min_double_occupancies
+	N_up_singles = N_up_target - N_full
+	N_down_singles = N_down_target - N_full
+
+	product_state = L * ['empty']
+	idx = 0
+	for _ in range(N_full):
+		product_state[idx] = 'full'
+		idx += 1
+	for _ in range(N_up_singles):
+		product_state[idx] = 'up'
+		idx += 1
+	for _ in range(N_down_singles):
+		product_state[idx] = 'down'
+		idx += 1
+
+	# Canonical ensemble: enforce U(1) symmetry for total N and set mu=0.
+	model = RealSpaceHubbard1D({
+		'L': L,
+		'U': U,
+		't': t,
+		'bc': 'open',
+		'bc_MPS': 'finite',
+		'mu': 0.0,
+		'V': V,
+		'V_sep': V_sep,
+		'cons_N': 'N',
+		'cons_Sz': None,
+	})
+
+	psi = tp.MPS.from_product_state(model.lat.mps_sites(), product_state)
+
+	dmrg_params = {'mixer': True, 'trunc_params': {'chi_max': chi, 'svd_min': 1e-8},
+		'max_E_err': 1e-8, 'max_S_err': 1e-6, 'min_sweeps': 5, 'max_sweeps': 50, 'max_trunc_err': None}
+
+	engine = tp.TwoSiteDMRGEngine(psi, model, dmrg_params)
+	E, psi = engine.run()
+
+	N_up = np.mean([psi.expectation_value('Nu', i) for i in range(L)])
+	N_down = np.mean([psi.expectation_value('Nd', i) for i in range(L)])
+	filling = N_up + N_down
+
 	return E, psi, filling
 
 # uses iDMRG to get gnd state energy density in thermodynamic limit (L -> \infty)
