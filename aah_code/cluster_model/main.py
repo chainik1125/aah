@@ -463,7 +463,8 @@ if __name__ == "__main__":
     
     # Example usage of the new function:
 
-    data_path='/Users/dmitrymanning-coe/Documents/Research/Barry Bradlyn/Moire/K_blocking/new_code/aah/aah_code/cluster_model/large_files/cluster_runs/merged_results/sep_1-4_merge.pkl'
+    data_path='/Users/dmitrymanning-coe/Documents/Research/Barry Bradlyn/Moire/K_blocking/new_code/aah/aah_code/cluster_model/large_files/plots/U_value_energy_comparison_L24_chi32_20251219_233103.pkl'
+    #'/Users/dmitrymanning-coe/Documents/Research/Barry Bradlyn/Moire/K_blocking/new_code/aah/aah_code/cluster_model/large_files/cluster_runs/merged_results/sep_1-4_merge.pkl'
 
     with open(data_path, 'rb') as f:
         results_data = pickle.load(f)
@@ -481,10 +482,10 @@ if __name__ == "__main__":
         v_sep_ratio=(1, 2),
         int_sep_ratios={2:(1,2)},
         cluster_sizes=[2],
-        U_values=[0,1,2,3,4,5,20],
-        V_values=[1e-6,1,5],
+        U_values=[0,1,2,3,10],
+        V_values=[1e-6,1],
         L=24,
-        t=1.0,
+        t=-1.0,
         solver_method='sparse_ED',
         states_retained=6,
         chi=32,
@@ -497,7 +498,7 @@ if __name__ == "__main__":
         include_timing=False,
         include_timing_plot=False,
         plot_relative_error=False,
-        # results=#data_path,  # Load existing results
+        results=data_path,  # Load existing results
         set_filling=1/2,
         dmrg_fixed_filling=1/2
     )
