@@ -4,8 +4,8 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --mem=32G
 #SBATCH --ntasks=1
-#SBATCH --time=08:00:00
-#SBATCH --partition=eng-research-gpu
+#SBATCH --time=02:00:00
+#SBATCH --partition=IllinoisComputes
 #SBATCH --account=bbradlyn-ic
 #SBATCH --mail-user=dmanningcoe@gmail.com
 #SBATCH --mail-type=ALL

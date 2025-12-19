@@ -9,18 +9,20 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../../../.." && pwd)"
 
 # ----------------------- User-configurable grids -----------------------
 # Edit these lists to your desired sweep. Values are space-separated.
-U_LIST=${U_LIST:-"0 5e-1 1 2 3 5 10"}
-V_LIST=${V_LIST:-"1e-6 1 2 3 5 10"}
+U_LIST=${U_LIST:-"0 10"}
+#${U_LIST:-"0 5e-1 1 2 3 5 10"}
+V_LIST=${V_LIST:-"1e-6 1"}
+#V_LIST=${V_LIST:-"1e-6 1 2 3 5 10"}
 T_VALUE=${T_VALUE:-1.0}
-L_VALUE=${L_VALUE:-120}
-CHI_VALUE=${CHI_VALUE:-64}
+L_VALUE=${L_VALUE:-24}
+CHI_VALUE=${CHI_VALUE:-32}
 # Target filling per site for fixed-filling workflows. Leave empty/"none" for default (grand-canonical).
 SET_FILLING=${SET_FILLING:-""}
 SOLVER_METHOD=${SOLVER_METHOD:-sparse_ED}
 STATES_RETAINED=${STATES_RETAINED:-6}
 V_SEP_RATIO=${V_SEP_RATIO:-"1,2"}
-INT_SEP_RATIOS=${INT_SEP_RATIOS:-"{2:[1,2],4:[1,4],6:[1,6]}"}  # JSON-like dict or tuple
-CLUSTER_SIZES=${CLUSTER_SIZES:-"2 4 6"}                  # space-separated list
+INT_SEP_RATIOS=${INT_SEP_RATIOS:-"{2:[1,2],4:[1,4]}"}  # JSON-like dict or tuple
+CLUSTER_SIZES=${CLUSTER_SIZES:-"2 4"}                  # space-separated list
 INCLUDE_IDMRG=${INCLUDE_IDMRG:-true}
 INCLUDE_FINITE_DMRG=${INCLUDE_FINITE_DMRG:-true}
 INCLUDE_TIMING=${INCLUDE_TIMING:-false}
