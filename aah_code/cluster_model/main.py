@@ -498,7 +498,7 @@ if __name__ == "__main__":
         include_timing=False,
         include_timing_plot=False,
         plot_relative_error=False,
-        results=data_path,  # Load existing results
+        #results=data_path,  # Load existing results
         set_filling=1/2,
         dmrg_fixed_filling=1/2
     )
