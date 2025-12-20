@@ -648,7 +648,9 @@ class FullSpectrum():
 			numerator = np.sum(weights * observable_spectrum, axis=-1, keepdims=True)
 			return (numerator / Z)[:, 0]
 		
-		# 2) Optionally solve for mu by targeting a per-site filling, then average mu over superclusters.
+		# 2) Optionally solve for a *single global* mu by targeting a per-site filling.
+		#    Note: solving a separate mu per supercluster enforces the filling constraint
+		#    locally (per supercluster) and is not the intended semantics for set_filling.
 		mu_eff_by_supercluster = None
 		mu_eff_used = self.physical_params.mu_0
 
@@ -658,7 +660,6 @@ class FullSpectrum():
 			target_filling = float(target_filling)
 			if not np.isfinite(target_filling):
 				raise ValueError(f"target_filling must be finite, got {target_filling}")
-			beta = 1.0 / float(temperature)
 
 			def bracket_monotone_root(g, x0: float, step0: float = 1.0, max_expand: int = 60):
 				g0 = g(x0)
@@ -668,7 +669,6 @@ class FullSpectrum():
 				if g0 > 0:
 					# Need smaller x.
 					x_hi = x0
-					g_hi = g0
 					for _ in range(max_expand):
 						x_lo = x0 - step
 						g_lo = g(x_lo)
@@ -678,7 +678,6 @@ class FullSpectrum():
 				else:
 					# Need larger x.
 					x_lo = x0
-					g_lo = g0
 					for _ in range(max_expand):
 						x_hi = x0 + step
 						g_hi = g(x_hi)
@@ -688,39 +687,35 @@ class FullSpectrum():
 				raise ValueError("Failed to bracket monotone root (target filling likely out of range).")
 
 			num_superclusters = total_energy_spectrum.shape[0]
-			mu_eff_by_supercluster = np.empty(num_superclusters, dtype=float)
+			total_num_sites = float(num_superclusters * num_cluster_sites)
+
+			# Quick reachability check (within the retained spectra).
+			min_N_total = float(np.min(number_spectrum_site_sum, axis=-1).sum())
+			max_N_total = float(np.max(number_spectrum_site_sum, axis=-1).sum())
+			min_fill = min_N_total / total_num_sites
+			max_fill = max_N_total / total_num_sites
+			if target_filling < min_fill or target_filling > max_fill:
+				raise ValueError(
+					f"Target filling {target_filling} out of range for the retained spectra: "
+					f"[{min_fill}, {max_fill}]"
+				)
+
 			mu0_guess = float(self.physical_params.mu_0)
 			xtol = 1e-7
 			maxiter = 200
 
-			for sc_idx in range(num_superclusters):
-				energies_sc = total_energy_spectrum[sc_idx]
-				n_states_sc = number_spectrum_site_sum[sc_idx]
-				min_fill = float(np.min(n_states_sc) / num_cluster_sites)
-				max_fill = float(np.max(n_states_sc) / num_cluster_sites)
-				if target_filling < min_fill or target_filling > max_fill:
-					raise ValueError(
-						f"Target filling {target_filling} out of range for supercluster {sc_idx}: "
-						f"[{min_fill}, {max_fill}]"
-					)
+			def g(mu_value: float) -> float:
+				n_expect_by_sc = calculate_observable(mu_value, number_spectrum_site_sum)
+				n_expect_total = float(np.sum(n_expect_by_sc))
+				return (n_expect_total / total_num_sites) - target_filling
 
-				def g(mu_value: float) -> float:
-					mu_delta = mu_value - mu0_guess
-					gcp_energies_sc = energies_sc - (mu_delta * n_states_sc)
-					log_weights_sc = -beta * gcp_energies_sc
-					shift_sc = float(np.max(log_weights_sc))
-					weights_sc = np.exp(log_weights_sc - shift_sc)
-					Z_sc = float(np.sum(weights_sc))
-					n_expect_sc = float(np.sum(weights_sc * n_states_sc) / Z_sc)
-					return (n_expect_sc / num_cluster_sites) - target_filling
+			mu_lo, mu_hi = bracket_monotone_root(g, mu0_guess)
+			if mu_lo == mu_hi:
+				mu_eff_used = float(mu_lo)
+			else:
+				mu_eff_used = float(bisect(g, mu_lo, mu_hi, xtol=xtol, maxiter=maxiter))
+			logger.info(f"mu_eff(global) = {mu_eff_used}")
 
-				mu_lo, mu_hi = bracket_monotone_root(g, mu0_guess)
-				mu_eff_by_supercluster[sc_idx] = float(bisect(g, mu_lo, mu_hi, xtol=xtol, maxiter=maxiter))
-
-			mu_eff_used = float(np.mean(mu_eff_by_supercluster))
-			logger.info(f"mu_eff(avg over {num_superclusters} superclusters) = {mu_eff_used}")
-		
-		
 		self.last_mu_eff = mu_eff_used
 		self.last_mu_eff_by_supercluster = mu_eff_by_supercluster
 		self.last_target_filling = target_filling
@@ -733,14 +728,13 @@ class FullSpectrum():
 		system_energy_expectation = calculate_observable(mu_for_expectations, total_energy_spectrum).sum()
 		system_number_expectation = calculate_observable(mu_for_expectations, number_spectrum_site_sum).sum()
 		
-		spin_multiplier=np.array([1,-1])#to give +1 to up spins and -1 to down spins.
-		#spin_spectrum
-		spin_input=total_spin_spectrum*spin_multiplier[np.newaxis,:,np.newaxis,np.newaxis]
-		summed_spin_input=spin_input.sum(axis=1)
-		site_summed_spin_input=summed_spin_input.sum(axis=-1)
+		spin_multiplier = np.array([1, -1])  # (+1)*up + (-1)*down
+		spin_input = total_spin_spectrum * spin_multiplier[np.newaxis, :, np.newaxis, np.newaxis]
+		summed_spin_input = spin_input.sum(axis=1)
+		site_summed_spin_input = summed_spin_input.sum(axis=-1)
 		system_spin_expectation = calculate_observable(mu_for_expectations, site_summed_spin_input).sum()
 		
-		return system_energy_expectation,system_number_expectation,system_spin_expectation
+		return system_energy_expectation, system_number_expectation, system_spin_expectation
 	
 	def get_cluster_thermodynamic_expectations(
 		self,
