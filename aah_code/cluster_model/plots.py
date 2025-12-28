@@ -2328,3 +2328,730 @@ def compare_U_values_with_dmrg(
         fig.show()
 
     return fig, results_payload
+
+
+def compare_filling_with_int_cluster_sizes(
+    int_sep_ratios_by_Nc: Dict[int, Sequence[Tuple[int, int]]],
+    U_values: Sequence[float],
+    *,
+    V: float = 0.0,
+    v_sep_ratio: Optional[Tuple[int, int]] = None,
+    t: float = 1.0,
+    L: int = 20,
+    chi: int = 32,
+    solver_method: str = 'dense_ED',
+    states_retained: int = 4,
+    output_dir: str = 'large_files/plots',
+    show_plots: bool = True,
+    save_html: bool = True,
+    save_data: bool = True,
+    filename_prefix: str = 'filling_int_cluster_comparison',
+    include_idmrg: bool = True,
+    include_finite_dmrg: bool = True,
+    include_timing: bool = False,
+    include_timing_plot: bool = False,
+    plot_relative_error: bool = False,
+    set_filling: Optional[float] = None,
+    dmrg_fixed_filling: bool = False,
+    results: Optional[Union[Dict, str, os.PathLike]] = None,
+) -> Tuple[go.Figure, Dict]:
+    """
+    Compare half-filling and quarter-filling results across cluster sizes and interaction separations.
+
+    Creates a 2x3 grid per page where:
+    - Top row: Half-filling (mu_0 = U/2) for each cluster size
+    - Bottom row: Quarter-filling (mu_0 = 0) for the same cluster sizes
+    - X-axis: U values
+    - Lines on each subplot: Different interaction cluster separations compatible with that N_c
+    - Y-axis: Ground state energy per site (or relative error if plot_relative_error=True)
+
+    When V≈0 (|V| < 1e-6), automatically sets v_sep_ratio to (1,1) to avoid cluster fusion,
+    which produces an inert onsite term instead of inter-cluster hopping.
+
+    Args:
+        int_sep_ratios_by_Nc: Dict mapping each cluster size (N_c) to a list of compatible
+            interaction separation ratios. E.g.:
+            {
+                2: [(1, 2), (1, 4), (1, 8)],   # π, π/2, π/4 for N_c=2
+                3: [(1, 3), (2, 3)],            # π/3, 2π/3 for N_c=3
+                4: [(1, 4), (1, 8)],            # π/2, π/4 for N_c=4
+            }
+            The keys determine which cluster sizes are plotted (one column per N_c).
+        U_values: U values for x-axis.
+        V: Fixed V value across all subplots (default 0).
+        v_sep_ratio: Ratio controlling the AA modulation for V. If None and |V| < 1e-6,
+            defaults to (1,1) to avoid fusion. Otherwise defaults to (1,2).
+        t: Hopping parameter.
+        L: System size for the cluster method.
+        chi: Bond dimension for iDMRG.
+        solver_method: Diagonalisation backend for the cluster Hamiltonian.
+        states_retained: Number of states retained in the cluster solver.
+        output_dir: Directory for saved artifacts.
+        show_plots: Whether to open the generated Plotly figure.
+        save_html: If True, save the interactive figure as HTML.
+        save_data: If True, pickle the raw numerical results.
+        filename_prefix: Prefix for saved artifact names.
+        include_idmrg: Whether to include iDMRG reference calculations.
+        include_finite_dmrg: Whether to include finite DMRG reference calculations.
+        include_timing: Whether to record timing information.
+        include_timing_plot: Whether to generate timing plots.
+        plot_relative_error: If True, show |E_finite - E| / |E_finite| instead of energy.
+        set_filling: If provided, overrides the default half/quarter filling logic.
+            When None (default), top row uses mu_0=U/2 (half-filling) and bottom row uses mu_0=0.
+        dmrg_fixed_filling: If True, finite DMRG uses canonical ensemble (fixed N).
+        results: Pre-computed results dict or path to pickle file to load instead of computing.
+
+    Returns:
+        (figure, results_dict)
+    """
+    if t is None:
+        raise ValueError("Parameter t must be specified for the cluster calculations.")
+
+    # Handle V≈0 case: use inert v_sep_ratio to avoid cluster fusion
+    V_ZERO_THRESHOLD = 1e-6
+    if v_sep_ratio is None:
+        if abs(V) < V_ZERO_THRESHOLD:
+            v_sep_ratio = (1, 1)  # Step = L, creates onsite term, no fusion
+            print(f"V≈0 detected: using v_sep_ratio=(1,1) to avoid cluster fusion")
+        else:
+            v_sep_ratio = (1, 2)  # Default π spacing
+
+    def _coerce_ratio(value, label: str) -> Tuple[int, int]:
+        if value is None:
+            raise ValueError(f"{label} ratio must be provided.")
+        if isinstance(value, np.ndarray):
+            value = value.tolist()
+        if not isinstance(value, (list, tuple)) or len(value) != 2:
+            raise ValueError(f"{label} ratio must be a length-2 iterable, got {value!r}.")
+        try:
+            p = int(round(value[0]))
+            q = int(round(value[1]))
+        except Exception as exc:
+            raise ValueError(f"Could not parse {label} ratio {value!r} into integers.") from exc
+        if q == 0:
+            raise ValueError(f"Denominator for {label} ratio cannot be zero.")
+        return (p, q)
+
+    # Parse and validate int_sep_ratios_by_Nc
+    if not int_sep_ratios_by_Nc:
+        raise ValueError("Provide at least one cluster size with int_sep_ratios.")
+
+    # Build validated structure: {Nc: [coerced ratios]}
+    int_sep_map: Dict[int, List[Tuple[int, int]]] = {}
+    for Nc, ratios in int_sep_ratios_by_Nc.items():
+        Nc = int(Nc)
+        if not ratios:
+            raise ValueError(f"No int_sep_ratios provided for Nc={Nc}.")
+        int_sep_map[Nc] = [_coerce_ratio(r, f"int_sep (Nc={Nc})") for r in ratios]
+
+    cluster_sizes = sorted(int_sep_map.keys())
+
+    # Collect all unique int_sep_ratios across all Nc (for color mapping)
+    all_int_sep_ratios: List[Tuple[int, int]] = []
+    for ratios in int_sep_map.values():
+        for r in ratios:
+            if r not in all_int_sep_ratios:
+                all_int_sep_ratios.append(r)
+
+    U_values = np.asarray(U_values, dtype=float)
+    if U_values.ndim != 1 or U_values.size == 0:
+        raise ValueError("U_values must be a 1-D array with at least one entry.")
+
+    u_list = [float(u) for u in U_values]
+    v_sep_ratio = _coerce_ratio(v_sep_ratio, "V separation")
+
+    # Define the two filling modes: half-filling (mu_0=U/2) and quarter-filling (mu_0=0)
+    # When set_filling is provided, it overrides both rows with that target filling
+    filling_modes = ['half', 'quarter']  # top row, bottom row
+
+    # Storage structures
+    # Key: (Nc, int_sep_ratio, filling_mode) -> array of energies indexed by U
+    cluster_results: Dict[Tuple[int, Tuple[int, int], str], np.ndarray]
+    cluster_fillings: Dict[Tuple[int, Tuple[int, int], str], np.ndarray]
+    # DMRG caches: indexed by (u_idx, filling_mode_idx)
+    idmrg_cache: np.ndarray
+    finite_dmrg_cache: np.ndarray
+    idmrg_fill_cache: np.ndarray
+    finite_dmrg_fill_cache: np.ndarray
+    failed_calculations: List[Dict] = []
+    timing_csv_path = os.environ.get("TIMING_CSV") if include_timing else None
+    timing_recorder = TimingRecorder(csv_path=timing_csv_path) if include_timing else None
+
+    if results is not None:
+        # Load from pre-computed results
+        if isinstance(results, (str, os.PathLike)):
+            results_path = Path(results)
+            if not results_path.exists():
+                raise ValueError(f"Results file not found: {results_path}")
+            with open(results_path, 'rb') as fh:
+                results = pickle.load(fh)
+        elif not isinstance(results, dict):
+            raise ValueError("results must be a dict or path-like object when provided.")
+
+        save_data = False
+        print("Using precomputed results payload; skipping new simulations.")
+        params = results.get('parameters', {})
+
+        # Load caches
+        idmrg_cache = np.asarray(results.get('idmrg_energies', []), dtype=float)
+        if idmrg_cache.size == 0:
+            idmrg_cache = np.full((len(u_list), 2), np.nan, dtype=float)
+        finite_dmrg_cache = np.asarray(results.get('finite_dmrg_energies', []), dtype=float)
+        if finite_dmrg_cache.size == 0:
+            finite_dmrg_cache = np.full((len(u_list), 2), np.nan, dtype=float)
+        idmrg_fill_cache = np.asarray(results.get('idmrg_fillings', []), dtype=float)
+        if idmrg_fill_cache.size == 0:
+            idmrg_fill_cache = np.full((len(u_list), 2), np.nan, dtype=float)
+        finite_dmrg_fill_cache = np.asarray(results.get('finite_dmrg_fillings', []), dtype=float)
+        if finite_dmrg_fill_cache.size == 0:
+            finite_dmrg_fill_cache = np.full((len(u_list), 2), np.nan, dtype=float)
+
+        # Load cluster results
+        serialized_clusters = results.get('cluster_energies', {})
+        serialized_fills = results.get('cluster_fillings', {})
+        cluster_results = {}
+        cluster_fillings = {}
+
+        for Nc in cluster_sizes:
+            for int_sep in int_sep_map[Nc]:
+                int_sep_key = f"{int_sep[0]}_{int_sep[1]}"
+                for fill_idx, fill_mode in enumerate(filling_modes):
+                    key = (Nc, int_sep, fill_mode)
+
+                    cluster_by_nc = serialized_clusters.get(str(Nc), {})
+                    cluster_by_sep = cluster_by_nc.get(int_sep_key, {})
+                    series = cluster_by_sep.get(fill_mode)
+                    if series is None:
+                        cluster_results[key] = np.full(len(u_list), np.nan, dtype=float)
+                    else:
+                        cluster_results[key] = np.asarray(series, dtype=float)
+
+                    fill_by_nc = serialized_fills.get(str(Nc), {})
+                    fill_by_sep = fill_by_nc.get(int_sep_key, {})
+                    fill_series = fill_by_sep.get(fill_mode)
+                    if fill_series is None:
+                        cluster_fillings[key] = np.full(len(u_list), np.nan, dtype=float)
+                    else:
+                        cluster_fillings[key] = np.asarray(fill_series, dtype=float)
+
+        # Override metadata from results
+        params_v_sep = params.get('v_sep_ratio', v_sep_ratio)
+        v_sep_ratio = _coerce_ratio(params_v_sep, "V separation")
+        t = params.get('t', t)
+        L = params.get('L', L)
+        chi = params.get('chi', chi)
+        V = params.get('V', V)
+        states_retained = params.get('states_retained', states_retained)
+        include_idmrg = params.get('include_idmrg', include_idmrg)
+        include_finite_dmrg = params.get('include_finite_dmrg', include_finite_dmrg)
+    else:
+        # Compute fresh results
+        cluster_results = {
+            (Nc, int_sep, fill_mode): np.full(len(u_list), np.nan, dtype=float)
+            for Nc in cluster_sizes
+            for int_sep in int_sep_map[Nc]
+            for fill_mode in filling_modes
+        }
+        cluster_fillings = {
+            (Nc, int_sep, fill_mode): np.full(len(u_list), np.nan, dtype=float)
+            for Nc in cluster_sizes
+            for int_sep in int_sep_map[Nc]
+            for fill_mode in filling_modes
+        }
+        idmrg_cache = np.full((len(u_list), 2), np.nan, dtype=float)
+        finite_dmrg_cache = np.full((len(u_list), 2), np.nan, dtype=float)
+        idmrg_fill_cache = np.full((len(u_list), 2), np.nan, dtype=float)
+        finite_dmrg_fill_cache = np.full((len(u_list), 2), np.nan, dtype=float)
+
+        print("=" * 60)
+        print("Running cluster calculations")
+        print(f"Cluster sizes: {cluster_sizes}")
+        for Nc in cluster_sizes:
+            print(f"  Nc={Nc}: {[format_sep_as_pi(r) for r in int_sep_map[Nc]]}")
+        print(f"V = {V}, v_sep = {format_sep_as_pi(v_sep_ratio)}")
+        print("=" * 60)
+
+        for Nc in tqdm(cluster_sizes, desc="Cluster sizes", ncols=80):
+            for int_sep in int_sep_map[Nc]:
+                for fill_idx, fill_mode in enumerate(filling_modes):
+                    for u_idx, U in enumerate(u_list):
+                        # Determine mu_0 based on filling mode
+                        if set_filling is not None:
+                            # Use set_filling for both rows
+                            mu0 = U / 2.0  # Initial guess, will be adjusted by set_filling
+                            target_filling = set_filling
+                        else:
+                            if fill_mode == 'half':
+                                mu0 = U / 2.0
+                                target_filling = None
+                            else:  # quarter
+                                mu0 = 0.0
+                                target_filling = None
+
+                        physical_params = PhysicalParams(U=U, mu_0=mu0, V=V, t=t)
+                        run_config = ClusterModelConfig(
+                            L=L,
+                            int_cluster_size=Nc,
+                            cluster_separation_ratio=int_sep,
+                            V_separation_ratio=v_sep_ratio,
+                            ham_lib='quspin',
+                            physical_params=physical_params,
+                            model_bc='periodic',
+                            int_cluster_bc='periodic',
+                            super_cluster_bc='periodic',
+                            solver_method=solver_method,
+                            states_retained=states_retained,
+                        )
+
+                        try:
+                            super_cluster_size = None
+                            if timing_recorder is not None:
+                                try:
+                                    clusters_tmp = generate_clusters(L, Nc, int_sep, v_sep_ratio)
+                                    super_cluster_size = supercluster_size_from_clusters(clusters_tmp)
+                                except Exception:
+                                    pass
+
+                            meta = {
+                                "method": "cluster_ED",
+                                "U": U,
+                                "V": V,
+                                "t": t,
+                                "L": L,
+                                "Nc": Nc,
+                                "int_sep": int_sep,
+                                "v_sep": v_sep_ratio,
+                                "super_cluster_size": super_cluster_size,
+                                "filling_mode": fill_mode,
+                            }
+
+                            if target_filling is not None:
+                                system_expectations, _, mu_eff = time_call(
+                                    timing_recorder,
+                                    meta,
+                                    get_general_expectations,
+                                    run_config,
+                                    timing_recorder=timing_recorder,
+                                    set_filling=target_filling,
+                                    return_mu=True,
+                                )
+                            else:
+                                system_expectations, _ = time_call(
+                                    timing_recorder,
+                                    meta,
+                                    get_general_expectations,
+                                    run_config,
+                                    timing_recorder=timing_recorder,
+                                    mu_eff=mu0,
+                                )
+
+                            energy, filling, _ = system_expectations
+                            energy_subtracted = (energy + mu0 * filling) / L
+                            key = (Nc, int_sep, fill_mode)
+                            cluster_results[key][u_idx] = energy_subtracted
+                            cluster_fillings[key][u_idx] = filling / L
+                        except Exception as exc:
+                            failed_calculations.append({
+                                'method': f'cluster Nc={Nc}, int_sep={format_sep_as_pi(int_sep)}, {fill_mode}',
+                                'params': {'U': U, 'V': V},
+                                'error': str(exc),
+                            })
+
+        # Compute DMRG references for each filling mode
+        print("\n")
+        print("=" * 60)
+        print("Computing reference energies")
+        print("=" * 60)
+
+        for fill_idx, fill_mode in enumerate(filling_modes):
+            for u_idx, U in enumerate(u_list):
+                if set_filling is not None:
+                    mu_eff_value = U / 2.0  # This would need proper mu solving for DMRG
+                    target_fill = set_filling
+                else:
+                    if fill_mode == 'half':
+                        mu_eff_value = U / 2.0
+                        target_fill = 0.5
+                    else:
+                        mu_eff_value = 0.0
+                        target_fill = None  # Grand canonical with mu=0
+
+                # iDMRG
+                if include_idmrg:
+                    try:
+                        meta = {
+                            "method": "iDMRG",
+                            "U": U,
+                            "V": V,
+                            "t": t,
+                            "L": L,
+                            "Nc": None,
+                            "int_sep": None,
+                            "v_sep": v_sep_ratio,
+                            "super_cluster_size": None,
+                            "filling_mode": fill_mode,
+                        }
+                        energy_dmrg, filling_dmrg, _ = time_call(
+                            timing_recorder,
+                            meta,
+                            run_dmrg_method,
+                            U,
+                            mu_eff_value,
+                            V,
+                            v_sep_ratio,
+                            t,
+                            L,
+                            chi,
+                        )
+                        dmrg_value = energy_dmrg + mu_eff_value * filling_dmrg
+                        idmrg_cache[u_idx, fill_idx] = dmrg_value
+                        idmrg_fill_cache[u_idx, fill_idx] = filling_dmrg
+                    except Exception as exc:
+                        failed_calculations.append({
+                            'method': f'iDMRG ({fill_mode})',
+                            'params': {'U': U, 'V': V},
+                            'error': str(exc),
+                        })
+
+                # Finite DMRG
+                if include_finite_dmrg:
+                    try:
+                        meta = {
+                            "method": "DMRG",
+                            "U": U,
+                            "V": V,
+                            "t": t,
+                            "L": L,
+                            "Nc": None,
+                            "int_sep": None,
+                            "v_sep": v_sep_ratio,
+                            "super_cluster_size": None,
+                            "filling_mode": fill_mode,
+                        }
+                        if dmrg_fixed_filling and target_fill is not None:
+                            energy_finite, _, filling_finite = time_call(
+                                timing_recorder,
+                                meta,
+                                get_gnd_fixed_filling,
+                                L,
+                                chi,
+                                target_fill,
+                                U,
+                                t,
+                                V,
+                                v_sep_ratio,
+                            )
+                            energy_finite_per_site = energy_finite / L
+                            dmrg_value = energy_finite_per_site
+                        else:
+                            energy_finite, _, filling_finite = time_call(
+                                timing_recorder,
+                                meta,
+                                get_gnd,
+                                L,
+                                chi,
+                                U,
+                                t,
+                                mu_eff_value,
+                                V,
+                                v_sep_ratio,
+                            )
+                            energy_finite_per_site = energy_finite / L
+                            dmrg_value = energy_finite_per_site + mu_eff_value * filling_finite
+                        finite_dmrg_cache[u_idx, fill_idx] = dmrg_value
+                        finite_dmrg_fill_cache[u_idx, fill_idx] = filling_finite
+                    except Exception as exc:
+                        failed_calculations.append({
+                            'method': f'Finite DMRG ({fill_mode})',
+                            'params': {'U': U, 'V': V},
+                            'error': str(exc),
+                        })
+
+    # --- PLOTTING LOGIC ---
+    color_palette = [
+        '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728',
+        '#9467bd', '#8c564b', '#e377c2', '#7f7f7f',
+        '#bcbd22', '#17becf',
+    ]
+    int_sep_color_map = {int_sep: color_palette[idx % len(color_palette)] for idx, int_sep in enumerate(all_int_sep_ratios)}
+
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Create figure with 2 rows (half/quarter filling) x N_c columns
+    n_cols = len(cluster_sizes)
+    n_cols_per_page = 3
+    n_pages = int(np.ceil(n_cols / n_cols_per_page))
+
+    figures: List[go.Figure] = []
+    html_paths: List[str] = []
+
+    for page_idx in range(n_pages):
+        start_col = page_idx * n_cols_per_page
+        end_col = min(start_col + n_cols_per_page, n_cols)
+        current_cluster_sizes = cluster_sizes[start_col:end_col]
+        n_cols_this_page = len(current_cluster_sizes)
+
+        # Subplot titles
+        top_titles = [f"Half-filling (μ₀=U/2): N_c={Nc}" for Nc in current_cluster_sizes]
+        bottom_titles = [f"Quarter-filling (μ₀=0): N_c={Nc}" for Nc in current_cluster_sizes]
+
+        fig = make_subplots(
+            rows=2,
+            cols=n_cols_this_page,
+            subplot_titles=top_titles + bottom_titles,
+            horizontal_spacing=0.08,
+            vertical_spacing=0.12,
+        )
+
+        any_trace = False
+        for col_idx, Nc in enumerate(current_cluster_sizes):
+            col = col_idx + 1
+
+            for row_idx, fill_mode in enumerate(filling_modes):
+                row = row_idx + 1
+
+                # Reference data for relative error
+                reference_series = finite_dmrg_cache[:, row_idx] if plot_relative_error else None
+                if plot_relative_error and reference_series is not None:
+                    if not np.any(np.isfinite(reference_series)):
+                        warnings.warn(f"No finite DMRG reference for {fill_mode} filling")
+
+                # Add DMRG reference lines
+                idmrg_energies = idmrg_cache[:, row_idx]
+                if np.any(np.isfinite(idmrg_energies)) and not plot_relative_error:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=u_list,
+                            y=idmrg_energies,
+                            mode='lines+markers',
+                            name="iDMRG",
+                            legendgroup="iDMRG",
+                            marker=dict(color='black', size=6, symbol='x'),
+                            line=dict(color='black', width=2, dash='dash'),
+                            showlegend=(col_idx == 0 and row_idx == 0),
+                            hovertemplate="U=%{x:.3g}<br>E_iDMRG=%{y:.6f}<extra></extra>",
+                        ),
+                        row=row,
+                        col=col,
+                    )
+                    any_trace = True
+
+                finite_dmrg_energies = finite_dmrg_cache[:, row_idx]
+                if np.any(np.isfinite(finite_dmrg_energies)) and not plot_relative_error:
+                    finite_label = "Finite DMRG (fixed N)" if dmrg_fixed_filling else "Finite DMRG"
+                    fig.add_trace(
+                        go.Scatter(
+                            x=u_list,
+                            y=finite_dmrg_energies,
+                            mode='lines+markers',
+                            name=finite_label,
+                            legendgroup=finite_label,
+                            marker=dict(color='gray', size=6, symbol='cross'),
+                            line=dict(color='gray', width=2, dash='dot'),
+                            showlegend=(col_idx == 0 and row_idx == 0),
+                            hovertemplate="U=%{x:.3g}<br>E_Finite=%{y:.6f}<extra></extra>",
+                        ),
+                        row=row,
+                        col=col,
+                    )
+                    any_trace = True
+
+                # Add cluster lines for each interaction separation (specific to this Nc)
+                for int_sep in int_sep_map[Nc]:
+                    key = (Nc, int_sep, fill_mode)
+                    cluster_energies = cluster_results[key]
+
+                    xs, ys, hover_text = [], [], []
+                    for u_idx, U in enumerate(u_list):
+                        c_en = cluster_energies[u_idx]
+                        if not np.isfinite(c_en):
+                            continue
+
+                        if plot_relative_error and reference_series is not None:
+                            ref = reference_series[u_idx]
+                            if not (np.isfinite(ref) and ref != 0):
+                                continue
+                            c_err = np.abs(c_en - ref) / np.abs(ref)
+                            xs.append(U)
+                            ys.append(c_err)
+                            hover_text.append(
+                                f"U={U:.3g}<br>Nc={Nc}<br>int_sep={format_sep_as_pi(int_sep)}<br>rel_err={c_err:.2%}"
+                            )
+                        else:
+                            xs.append(U)
+                            ys.append(c_en)
+                            hover_text.append(
+                                f"U={U:.3g}<br>Nc={Nc}<br>int_sep={format_sep_as_pi(int_sep)}<br>E={c_en:.6f}"
+                            )
+
+                    if not xs:
+                        continue
+
+                    int_sep_label = format_sep_as_pi(int_sep)
+                    fig.add_trace(
+                        go.Scatter(
+                            x=xs,
+                            y=ys,
+                            mode='lines+markers',
+                            name=f"m={int_sep_label}",
+                            legendgroup=f"int_sep_{int_sep[0]}_{int_sep[1]}",
+                            marker=dict(color=int_sep_color_map[int_sep], size=8),
+                            line=dict(color=int_sep_color_map[int_sep], width=2),
+                            showlegend=(col_idx == 0 and row_idx == 0),
+                            hovertemplate="%{text}<extra></extra>",
+                            text=hover_text,
+                        ),
+                        row=row,
+                        col=col,
+                    )
+                    any_trace = True
+
+                # Axis labels
+                fig.update_xaxes(title_text="U", row=row, col=col)
+                fig.update_yaxes(
+                    title_text="Relative error" if plot_relative_error else "Energy per site",
+                    row=row,
+                    col=col,
+                    type='linear',
+                    tickformat='.2%' if plot_relative_error else '.4f',
+                )
+
+        if not any_trace:
+            raise RuntimeError("No valid data points available to plot.")
+
+        # Layout and annotations
+        v_sep_label = format_sep_as_pi(v_sep_ratio)
+        annotation_parts = [
+            f"V={V}",
+            f"v_sep={v_sep_label}",
+            f"t={t}",
+            f"L={L}",
+            f"chi={chi}",
+            f"states={states_retained}",
+        ]
+        if set_filling is not None:
+            annotation_parts.insert(0, f"n_target={set_filling}")
+        annotation_text = ", ".join(annotation_parts)
+        if n_pages > 1:
+            annotation_text += f" | Page {page_idx + 1}/{n_pages}"
+
+        fig.update_layout(
+            title=dict(
+                text="Relative Error vs U (Half vs Quarter Filling)" if plot_relative_error
+                     else "Ground State Energy vs U (Half vs Quarter Filling)",
+                x=0.5,
+                xanchor='center'
+            ),
+            hovermode='closest',
+            legend_title="Int. Separation",
+            height=700,
+            width=400 * n_cols_this_page,
+        )
+        fig.add_annotation(
+            text=annotation_text,
+            x=0.5,
+            xref='paper',
+            y=1.06,
+            yref='paper',
+            showarrow=False,
+            font=dict(size=12, color='gray'),
+        )
+
+        if save_html:
+            page_suffix = f"_page_{page_idx + 1}" if n_pages > 1 else ""
+            html_name = f"{filename_prefix}_L{L}_chi{chi}_{timestamp}{page_suffix}.html"
+            html_path = os.path.join(output_dir, html_name)
+            fig.write_html(html_path)
+            html_paths.append(html_path)
+            print(f"Saved figure to {html_path}")
+
+        figures.append(fig)
+
+    fig = figures[0] if figures else None
+    saved_paths = {}
+    if save_html:
+        saved_paths['html_pages'] = html_paths
+        if html_paths:
+            saved_paths['html'] = html_paths[0]
+
+    # Serialize results
+    cluster_energy_serialized: Dict[str, Dict[str, Dict[str, List[float]]]] = {}
+    cluster_fillings_serialized: Dict[str, Dict[str, Dict[str, List[float]]]] = {}
+    for Nc in cluster_sizes:
+        cluster_energy_serialized[str(Nc)] = {}
+        cluster_fillings_serialized[str(Nc)] = {}
+        for int_sep in int_sep_map[Nc]:
+            int_sep_key = f"{int_sep[0]}_{int_sep[1]}"
+            cluster_energy_serialized[str(Nc)][int_sep_key] = {}
+            cluster_fillings_serialized[str(Nc)][int_sep_key] = {}
+            for fill_mode in filling_modes:
+                key = (Nc, int_sep, fill_mode)
+                cluster_energy_serialized[str(Nc)][int_sep_key][fill_mode] = cluster_results[key].tolist()
+                cluster_fillings_serialized[str(Nc)][int_sep_key][fill_mode] = cluster_fillings[key].tolist()
+
+    # Serialize int_sep_map for storage
+    int_sep_map_serialized = {str(Nc): [list(r) for r in ratios] for Nc, ratios in int_sep_map.items()}
+
+    results_payload = {
+        'cluster_sizes': cluster_sizes,
+        'int_sep_ratios_by_Nc': int_sep_map_serialized,
+        'U_values': u_list,
+        'V': V,
+        'filling_modes': filling_modes,
+        'cluster_energies': cluster_energy_serialized,
+        'cluster_fillings': cluster_fillings_serialized,
+        'idmrg_energies': idmrg_cache.tolist(),
+        'finite_dmrg_energies': finite_dmrg_cache.tolist(),
+        'idmrg_fillings': idmrg_fill_cache.tolist(),
+        'finite_dmrg_fillings': finite_dmrg_fill_cache.tolist(),
+        'parameters': {
+            'v_sep_ratio': v_sep_ratio,
+            'V': V,
+            't': t,
+            'L': L,
+            'chi': chi,
+            'solver_method': solver_method,
+            'states_retained': states_retained,
+            'include_idmrg': include_idmrg,
+            'include_finite_dmrg': include_finite_dmrg,
+            'plot_relative_error': plot_relative_error,
+            'set_filling': set_filling,
+            'dmrg_fixed_filling': dmrg_fixed_filling,
+        },
+        'artifacts': saved_paths,
+        'failures': failed_calculations,
+    }
+
+    if include_timing and timing_recorder is not None:
+        results_payload['timings'] = timing_recorder.records
+        if include_timing_plot and timing_recorder.records:
+            fig_timing, timing_artifacts = plot_timings(
+                timing_recorder.records,
+                output_dir=output_dir,
+                filename_prefix=f"{filename_prefix}_timing",
+                show_plots=show_plots,
+            )
+            saved_paths['timing_plot'] = timing_artifacts.get('html')
+
+    if save_data:
+        pickle_name = f"{filename_prefix}_L{L}_chi{chi}_{timestamp}.pkl"
+        pickle_path = os.path.join(output_dir, pickle_name)
+        with open(pickle_path, 'wb') as fh:
+            pickle.dump(results_payload, fh)
+        saved_paths['pickle'] = pickle_path
+        print(f"Saved data to {pickle_path}")
+
+    if failed_calculations:
+        print("\n" + "=" * 60)
+        print("WARNING: Some calculations failed")
+        print("=" * 60)
+        for failure in failed_calculations:
+            params_desc = ', '.join(f"{k}={v}" for k, v in failure['params'].items())
+            print(f"{failure['method']}: {params_desc}")
+            print(f"  Error: {failure['error'].splitlines()[0]}")
+
+    if show_plots and fig is not None:
+        fig.show()
+
+    return fig, results_payload

@@ -30,7 +30,7 @@ from aah_code.cluster_model.convergence_workflow import (
 )
 from aah_code.cluster_model.model import ClusterModelConfig, PhysicalParams
 from aah_code.cluster_model.run_scripts_me import get_general_expectations
-from aah_code.cluster_model.plots import compare_int_seps_with_dmrg, compare_cluster_sizes_with_dmrg, compare_U_values_with_dmrg
+from aah_code.cluster_model.plots import compare_int_seps_with_dmrg, compare_cluster_sizes_with_dmrg, compare_U_values_with_dmrg, compare_filling_with_int_cluster_sizes
 from aah_code.real_space_dmrg import run_dmrg_method
 import pickle
 
@@ -478,29 +478,54 @@ if __name__ == "__main__":
     
 
 
-    fig, results = compare_U_values_with_dmrg(
-        v_sep_ratio=(1, 2),
-        int_sep_ratios={2:(1,2)},
-        cluster_sizes=[2],
-        U_values=[0,1,2,3,10],
-        V_values=[1e-6,1],
+    # fig, results = compare_U_values_with_dmrg(
+    #     v_sep_ratio=(1, 2),
+    #     int_sep_ratios={2:(1,2)},
+    #     cluster_sizes=[2],
+    #     U_values=[0,1,2,3,10],
+    #     V_values=[1e-6,1],
+    #     L=24,
+    #     t=-1.0,
+    #     solver_method='sparse_ED',
+    #     states_retained=6,
+    #     chi=32,
+    #     log_yaxis=False,  # Plot energies on linear scale
+    #     include_idmrg=False,
+    #     include_finite_dmrg=True,
+    #     save_data=True,
+    #     save_html=False,
+    #     show_plots=True,
+    #     include_timing=False,
+    #     include_timing_plot=False,
+    #     plot_relative_error=False,
+    #     #results=data_path,  # Load existing results
+    #     set_filling=1/2,
+    #     dmrg_fixed_filling=1/2
+    # )
+
+    # Example usage of compare_filling_with_int_cluster_sizes:
+    # Compares half-filling (top row) vs quarter-filling (bottom row)
+    # across different cluster sizes (columns) and interaction separations (lines)
+    # Note: Each cluster size has its own compatible int_sep_ratios
+    #
+    fig, results = compare_filling_with_int_cluster_sizes(
+        int_sep_ratios_by_Nc={
+            2: [(1, 2), (1, 4), (1, 8)],   # π, π/2, π/4 for N_c=2
+            3: [(1, 3), (2, 3)],            # π/3, 2π/3 for N_c=3
+            4: [(1, 4), (1, 8)],            # π/2, π/4 for N_c=4
+        },
+        U_values=[0, 1, 2, 5, 10],          # x-axis
+        V=0.0,                              # Fixed V (uses v_sep=(1,1) automatically when V≈0)
         L=24,
-        t=-1.0,
+        t=1.0,
         solver_method='sparse_ED',
         states_retained=6,
         chi=32,
-        log_yaxis=False,  # Plot energies on linear scale
         include_idmrg=False,
         include_finite_dmrg=True,
         save_data=True,
-        save_html=False,
+        save_html=True,
         show_plots=True,
-        include_timing=False,
-        include_timing_plot=False,
         plot_relative_error=False,
-        #results=data_path,  # Load existing results
-        set_filling=1/2,
-        dmrg_fixed_filling=1/2
     )
 
-    
