@@ -30,7 +30,7 @@ from aah_code.cluster_model.convergence_workflow import (
 )
 from aah_code.cluster_model.model import ClusterModelConfig, PhysicalParams
 from aah_code.cluster_model.run_scripts_me import get_general_expectations
-from aah_code.cluster_model.plots import compare_int_seps_with_dmrg, compare_cluster_sizes_with_dmrg, compare_U_values_with_dmrg, compare_filling_with_int_cluster_sizes
+from aah_code.cluster_model.plots import compare_int_seps_with_dmrg, compare_cluster_sizes_with_dmrg, compare_U_values_with_dmrg, compare_filling_with_int_cluster_sizes, compare_compressibility_with_int_cluster_sizes, compare_compressibility_cluster_sizes, compare_compressibility_fixed_supercluster
 from aah_code.real_space_dmrg import run_dmrg_method
 import pickle
 
@@ -451,10 +451,12 @@ if __name__ == "__main__":
 #     states_retained=6,
 #     chi=32,
 #     log_yaxis=False,
-#     results=None,#'large_files/plots/cluster_size_convergence_L24_chi32_20251114_191504.pkl',
+#     results='large_files/plots/cluster_size_convergence_L24_chi32_20251114_191504.pkl',
 #     save_html=True,
-#     show_plots=True
+#     show_plots=True,
+#     plot_relative_error=False
 # )
+#     exit()
 
 
 
@@ -463,27 +465,29 @@ if __name__ == "__main__":
     
     # Example usage of the new function:
 
-    data_path='/Users/dmitrymanning-coe/Documents/Research/Barry Bradlyn/Moire/K_blocking/new_code/aah/aah_code/cluster_model/large_files/plots/U_value_energy_comparison_L24_chi32_20251219_233103.pkl'
+    data_path='large_files/plots/filling_int_cluster_comparison_L24_chi32_20251228_220850.pkl'
+    #'/Users/dmitrymanning-coe/Documents/Research/Barry Bradlyn/Moire/K_blocking/new_code/aah/aah_code/cluster_model/large_files/partials/filling_L48_20260126_001228/merged_20260126_001228.pkl'
+    #'/Users/dmitrymanning-coe/Documents/Research/Barry Bradlyn/Moire/K_blocking/new_code/aah/aah_code/cluster_model/large_files/plots/U_value_energy_comparison_L24_chi32_20251219_233103.pkl'
     #'/Users/dmitrymanning-coe/Documents/Research/Barry Bradlyn/Moire/K_blocking/new_code/aah/aah_code/cluster_model/large_files/cluster_runs/merged_results/sep_1-4_merge.pkl'
 
     with open(data_path, 'rb') as f:
         results_data = pickle.load(f)
         # print("Loaded results data keys:", results_data.keys())
     U_values=results_data['U_values']
-    V_values=results_data['V_values']
-    int_sep_ratios=results_data['int_sep_ratios']
+    # V_values=results_data['V_values']
+    int_sep_ratios=results_data['int_sep_ratios_by_Nc']
     cluster_sizes=results_data['cluster_sizes']
     print(f"params: {results_data['parameters']}")
     print(f"U_values: {U_values}")
     
-
+    
 
     # fig, results = compare_U_values_with_dmrg(
     #     v_sep_ratio=(1, 2),
-    #     int_sep_ratios={2:(1,2)},
-    #     cluster_sizes=[2],
-    #     U_values=[0,1,2,3,10],
-    #     V_values=[1e-6,1],
+    #     int_sep_ratios={2:(1,2),4:(1,4),6:(1,6)},
+    #     cluster_sizes=[2,4,6],
+    #     U_values=[0, 1, 2,3,4,5,7, 10,20,30],
+    #     V_values=[1e-6, 1,2,3,5],
     #     L=24,
     #     t=-1.0,
     #     solver_method='sparse_ED',
@@ -502,6 +506,7 @@ if __name__ == "__main__":
     #     set_filling=1/2,
     #     dmrg_fixed_filling=1/2
     # )
+    # exit()s
 
     # Example usage of compare_filling_with_int_cluster_sizes:
     # Compares half-filling (top row) vs quarter-filling (bottom row)
@@ -510,22 +515,289 @@ if __name__ == "__main__":
     #
     fig, results = compare_filling_with_int_cluster_sizes(
         int_sep_ratios_by_Nc={
-            2: [(1, 2), (1, 4), (1, 8)],   # π, π/2, π/4 for N_c=2
-            3: [(1, 3), (2, 3)],            # π/3, 2π/3 for N_c=3
-            4: [(1, 4), (1, 8)],            # π/2, π/4 for N_c=4
+            2: [(1, 2), (1, 4), (1, 8),(1,12),(1,24)],   # π, π/2, π/4 for N_c=2
+            3: [(1, 3), (1, 6),(1,12),(1,24)],            # π/3, 2π/3 for N_c=3
+            4: [(1, 4), (1, 8),(1,12)],            # π/2, π/4 for N_c=4
+            # 5: [(1,5),(1,10),(1,15)],
+            6: [(1, 6), (1, 12),(1,24)],
+            8: [(1, 8),(1,16),(1,24)],
         },
-        U_values=[0, 1, 2, 5, 10],          # x-axis
+        U_values=[0,1,2,3,4,5,7,10,20,30],#[0, 1, 2,3,4,5,7, 10,20,30],          # x-axis
         V=0.0,                              # Fixed V (uses v_sep=(1,1) automatically when V≈0)
-        L=24,
-        t=1.0,
+        L=48,
+        t=-1.0,
         solver_method='sparse_ED',
         states_retained=6,
         chi=32,
         include_idmrg=False,
         include_finite_dmrg=True,
         save_data=True,
-        save_html=True,
+        save_html=False,
         show_plots=True,
-        plot_relative_error=False,
+        cols_per_page=6,
+        plot_relative_error=True,
+        results='large_files/plots/filling_int_cluster_comparison_L48_chi32_20260206_113516.pkl',
+        # 'large_files/plots/filling_int_cluster_comparison_L48_chi32_20260206_113516.pkl' # nice data that demonstrates why you need 1/16 in the N_c=8 case! Will re-run at larger L!
+        # 'large_files/plots/filling_int_cluster_comparison_L120_chi32_20260205_184801.pkl', #really nice results at 120 but larger cluster sizes missing the smaller one.
+        # 'large_files/plots/filling_int_cluster_comparison_L120_chi32_20260205_184801.pkl',
+        # 'large_files/plots/filling_int_cluster_comparison_L24_chi32_20251228_220850.pkl'
     )
+    exit()
 
+    # Example usage of compare_compressibility_with_int_cluster_sizes:
+    # Compressibility plot: filling (n) vs mu_0 at various U values
+    # - Rows: different U values
+    # - Columns: different cluster sizes (N_c)
+    # - Lines: different interaction separations
+    # - Generates both filling and relative error matplotlib figures (PDF + SVG)
+    # fig, results = compare_compressibility_with_int_cluster_sizes(
+    #     int_sep_ratios_by_Nc={
+    #         2: [(1, 2), (1, 4), (1, 8), (1, 12), (1, 24)],
+    #         3: [(1, 3), (1, 6), (1, 12), (1, 24)],
+    #         4: [(1, 4), (1, 8), (1, 12)],
+    #         # 6: [(1, 6), (1, 12), (1, 24)],
+    #         # 8: [(1, 8), (1, 16), (1, 24)],
+    #     },
+    #     U_values=[0.1, 1,2, 5, 10],
+    #     n_mu_points=10,
+    #     mu_range_factor=1.0,
+    #     mu_min_range=1.0,
+    #     V=0.0,
+    #     L=48,
+    #     t=-1.0,
+    #     solver_method='sparse_ED',
+    #     states_retained=6,
+    #     chi=32,
+    #     include_idmrg=False,
+    #     include_finite_dmrg=True,
+    #     save_data=True,
+    #     save_html=False,
+    #     show_plots=True,
+    #     save_pdf=True,
+    #     results=None,
+    # )
+    # exit()
+    #results
+    # N_c=4,6,8 comparison for L=72
+    # large_files/plots/filling_int_cluster_comparison_L72_chi32_20251231_111030.pkl
+    # N_c=4,8 L=80
+    # Saved data to large_files/plots/filling_int_cluster_comparison_L80_chi32_20251231_115713.pkl
+    # L=120, N_c=2,3,4,6
+    # Saved data to large_files/plots/filling_int_cluster_comparison_L120_chi32_20260107_125158.pkl
+
+
+
+
+    # Example usage of compare_filling_cluster_sizes:
+    # Compares half-filling (top row) vs quarter-filling (bottom row)
+    # - Columns: different V values
+    # - X-axis: U values
+    # - Lines: different cluster sizes (N_c)
+    #
+    # from aah_code.cluster_model.plots import compare_filling_cluster_sizes
+    # fig, results = compare_filling_cluster_sizes(
+    #     v_sep_ratio=(1, 2),                    # π spacing for V
+    #     int_sep_ratios={                       # int_sep ratio for each cluster size
+    #         2: (1, 2),   # π for N_c=3
+    #         4: (1,4),   # 
+    #         # 4: (1, 4),   # π/2 for N_c=4
+    #         # 6: (1, 6),   # π/3 for N_c=6
+    #         # 8: (1, 8),   # π/4 for N_c=8
+    #         # 9: (1, 9),   # π/4 for N_c=8
+    #     },
+    #     cluster_sizes=[2,4],         # lines (different N_c)
+    #     U_values=[1,10],#[0, 1, 2,3,4,5,7, 10,20,30],          # x-axis
+    #     V_values=[1e-6],              # columns (different V)
+    #     L=48,
+    #     t=1.0,
+    #     solver_method='sparse_ED',
+    #     states_retained=6,
+    #     chi=64,
+    #     include_idmrg=True,
+    #     include_finite_dmrg=True,
+    #     save_data=True,
+    #     save_html=False,
+    #     results=None,
+    #     # large_files/plots/filling_int_cluster_comparison_L120_chi32_20260205_184801.pkl
+    #     # 'large_files/plots/filling_cluster_size_comparison_L48_chi32_20260205_105334.pkl',
+    #     # 'large_files/plots/filling_cluster_size_comparison_L48_chi32_20260204_213153.pkl',
+    #     # '/Users/dmitrymanning-coe/Documents/Research/Barry Bradlyn/Moire/K_blocking/new_code/aah/aah_code/cluster_model/large_files/partials/filling_L48_20260126_001228/merged_fixed.pkl',
+    #     # '/Users/dmitrymanning-coe/Documents/Research/Barry Bradlyn/Moire/K_blocking/new_code/aah/aah_code/cluster_model/large_files/partials/filling_L48_vsep_2pi3_20260126_112422/merged_20260126_112422.pkl',
+    #     # '/Users/dmitrymanning-coe/Documents/Research/Barry Bradlyn/Moire/K_blocking/new_code/aah/aah_code/cluster_model/large_files/partials/filling_L48_20260126_001228/merged_fixed.pkl',
+    #     #'large_files/plots/filling_cluster_size_comparison_L24_chi32_20260106_171531.pkl',
+    #     show_plots=True,
+    #     plot_relative_error=True,
+    #     log_yaxis=False,
+    #     axes=('U','V'),
+    #     cols_per_page=6,
+    #     shared_yaxis='page',
+    #     compute_localization=True
+        
+    # )
+
+    # exit()
+
+
+    #beta=1/2
+    # really nice results showing V convergence for \beta=\pi both at half and quarter filling!
+    # '/Users/dmitrymanning-coe/Documents/Research/Barry Bradlyn/Moire/K_blocking/new_code/aah/aah_code/cluster_model/large_files/partials/filling_L48_20260126_001228/merged_fixed.pkl',
+    # large_files/plots/filling_cluster_size_comparison_L48_chi32_20260125_230523.pkl
+
+
+
+    # N_c=3
+    # large_files/plots/filling_cluster_size_comparison_L36_chi32_20260106_192546.pkl
+
+    # Example usage of compare_fixed_supercluster:
+    # Compares different (Nc, int_sep) pairs that give the same supercluster size.
+    # - Rows: Different V values
+    # - Columns: Different supercluster sizes
+    # - X-axis: U values
+    # - Lines: Different (Nc, int_sep) pairs for that supercluster size
+    #          (maximal separation Nc=SC, int_sep=(1,SC) is shown in black)
+    #
+    
+    #
+    
+
+    # from aah_code.cluster_model.plots import plot_supercluster_filling_comparison
+
+    # fig, info = plot_supercluster_filling_comparison(
+    #     'large_files/plots/fixed_supercluster_comparison_L120_chi32_20260109_164745.pkl', 
+    #     'large_files/plots/fixed_supercluster_comparison_L120_chi32_20260113_174059.pkl',
+    #     U_fixed=10.0,
+    #     plot_relative_error=True,
+    #     log_yaxis=False,
+    #     shared_yaxis=True
+    # )
+
+    # fig.show()
+    
+    from aah_code.cluster_model.plots import compare_fixed_supercluster, compatible_int_seps, compute_supercluster_size
+    # # Option 1: Auto-generate (Nc, int_sep) pairs using supercluster_sizes and max_seps
+    fig, results = compare_fixed_supercluster(
+        v_sep_ratio=(1, 2),
+        U_values=[0, 1, 2,3,4,5,7, 10,20,30],
+        V_values=[1e-6, 1,2,5],
+        supercluster_sizes=[2,4,6,8],          # Auto-generate pairs for these SC sizes
+        max_seps=4,                            # Max 3 (Nc, int_sep) pairs per SC size
+        L=120,
+        t=1.0,
+        set_filling=1.0,
+        solver_method='sparse_ED',
+        chi=32,
+        save_data=True,
+        save_html=False,
+        include_finite_dmrg=True,
+        include_idmrg=False,
+        rows_per_page=1,                       # 3 V values per page
+        cols_per_page=4,                       # 3 supercluster sizes per page
+        plot_relative_error=True,
+        log_yaxis=False,
+        axes=['V','U'],
+        results='large_files/plots/fixed_supercluster_comparison_L120_chi32_20260109_164745.pkl'
+    )
+    exit()
+
+
+
+    # 'large_files/plots/fixed_supercluster_comparison_L120_chi32_20260109_164745.pkl', - beta = pi, 1/2 filling
+    #'large_files/plots/fixed_supercluster_comparison_L120_chi32_20260113_174059.pkl', - beta = pi, 1/4 filling
+    #
+    # # Option 2: Manually specify (Nc, int_sep) pairs
+    # fig, results = compare_fixed_supercluster(
+    #     v_sep_ratio=(1, 2),                    # π spacing for V (n=L/2=12 for L=24)
+    #     U_values=[0, 2, 4, 8],
+    #     V_values=[0.5, 1.0, 2.0],
+    #     supercluster_int_seps={
+    #         # supercluster_size -> list of (Nc, int_sep_ratio) pairs
+    #         # Each (Nc, int_sep) must:
+    #         #   1. Produce the claimed supercluster size
+    #         #   2. Have Nc compatible with int_sep (qm % Nc == 0)
+    #         # Format: (Nc, (p, q)) where int_sep_ratio = (p, q)
+    #         #
+    #         # SC=4: int_sep=(1,4) -> m=6, gcd(24,6,12)=6, SC=4
+    #         #       qm = L/gcd(L,m) = 24/6 = 4
+    #         #       Compatible Nc: 1, 2, 4 (must divide qm=4)
+    #         4: [
+    #             (4, (1, 4)),  # Nc=4, maximal separation (black)
+    #             (2, (1, 4)),  # Nc=2, same int_sep
+    #         ],
+    #         # SC=6: int_sep=(1,3) -> m=8, gcd(24,8,12)=4, SC=6
+    #         #       qm = 24/4 = 6, compatible Nc: 1, 2, 3, 6
+    #         #       int_sep=(1,6) -> m=4, gcd(24,4,12)=4, SC=6
+    #         #       qm = 24/4 = 6, compatible Nc: 1, 2, 3, 6
+    #         6: [
+    #             (6, (1, 6)),  # Nc=6, maximal separation (black)
+    #             (3, (1, 3)),  # Nc=3, int_sep=(1,3)
+    #             (2, (1, 6)),  # Nc=2, int_sep=(1,6)
+    #         ],
+    #         # SC=8: int_sep=(1,8) -> m=3, gcd(24,3,12)=3, SC=8
+    #         #       qm = 24/3 = 8, compatible Nc: 1, 2, 4, 8
+    #         8: [
+    #             (8, (1, 8)),  # Nc=8, maximal separation (black)
+    #             (4, (1, 8)),  # Nc=4
+    #             (2, (1, 8)),  # Nc=2
+    #         ],
+    #     },
+    #     L=24,
+    #     t=1.0,
+    #     set_filling=1.0,
+    #     solver_method='sparse_ED',
+    #     chi=32,
+    #     include_finite_dmrg=True,
+    #     plot_relative_error=False,
+    #     rows_per_page=3,                       # 3 V values per page
+    #     cols_per_page=3,                       # 3 supercluster sizes per page
+    # )
+
+    # Example usage of compare_compressibility_cluster_sizes:
+    # Compressibility (filling vs mu_0) for non-zero V, lines = different Nc
+    fig, results = compare_compressibility_cluster_sizes(
+        v_sep_ratio=(1, 2),                    # π spacing for V
+        int_sep_ratios={                       # int_sep ratio for each cluster size
+            2: (1, 2),   # π for N_c=2
+            4: (1, 4),   # π/2 for N_c=4
+            6: (1,6),
+            8: (1,8)
+        },
+        cluster_sizes=[2, 4],                  # lines (different N_c)
+        U_values=[1,2,5, 10],                      # rows
+        V_values=[1e-6, 1.0,3,5],                   # columns
+        n_mu_points=10,
+        mu_range_factor=1.0,
+        mu_min_range=1.0,
+        t=1.0,
+        L=48,
+        chi=32,
+        solver_method='sparse_ED',
+        states_retained=6,
+        include_idmrg=False,
+        include_finite_dmrg=True,
+        save_data=True,
+        save_html=False,
+        show_plots=True,
+        save_pdf=True,
+        results=None,
+        axes=('U', 'V'),                       # rows=U, cols=V
+    )
+    exit()
+
+    # Example usage of compare_compressibility_fixed_supercluster:
+    # Compressibility (filling vs mu_0) for fixed supercluster sizes
+    # fig_list, results = compare_compressibility_fixed_supercluster(
+    #     v_sep_ratio=(1, 2),
+    #     U_values=[0.1, 1],
+    #     V_values=[0.5],
+    #     supercluster_sizes=[4, 6],
+    #     n_mu_points=10,
+    #     mu_range_factor=1.0,
+    #     mu_min_range=1.0,
+    #     t=1.0,
+    #     L=48,
+    #     chi=32,
+    #     solver_method='dense_ED',
+    #     show_plots=False,
+    #     save_pdf=True,
+    #     axes=('U', 'V'),  # rows=U, pages=V
+    # )

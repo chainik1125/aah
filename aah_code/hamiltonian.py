@@ -43,7 +43,7 @@ try:
                 props = cp.cuda.runtime.getDeviceProperties(dev_id)
                 name = props['name'].decode('utf-8') if isinstance(props['name'], bytes) else props['name']
                 device_props.append(name)
-            logger.info(f"Detected CUDA devices: {device_props}")
+            print(f"Detected CUDA devices: {device_props}")
     except cp.cuda.runtime.CUDARuntimeError:
         GPU_ACCEL_AVAILABLE = False
 except Exception:  # pragma: no cover - CUDA optional
@@ -377,7 +377,7 @@ class SpectrumSolver():
 		self.use_gpu = GPU_ACCEL_AVAILABLE
 
 	def _build_site_number_ops(self, basis):
-		from quspin.operators import hamiltonian as _qs_hamiltonian
+		from aah_code.quspin_utils import hamiltonian as _qs_hamiltonian
 		n_up_ops=[]
 		n_down_ops=[]
 		for site in range(basis.L):

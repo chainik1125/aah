@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from typing import Tuple, List, Dict, Optional, Union
 import numpy as np
 import quspin
-from quspin.operators import hamiltonian
 from quspin.basis import spinful_fermion_basis_1d
+from aah_code.quspin_utils import hamiltonian
 from aah_code.cluster_model.clustering import generate_clusters, convert_site_clusters_to_k
 #from aah_code.cluster_model.t_tilde import alpha_terms_by_separation
 from aah_code.hamiltonian import benchmark_sparse_vs_dense
