@@ -12,7 +12,7 @@ import tenpy as tp
 from tenpy.algorithms import exact_diag
 import numpy as np
 import matplotlib.pyplot as plt
-from typing import Union
+from typing import Optional, Sequence, Union
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from tqdm import tqdm
@@ -201,6 +201,192 @@ def get_gnd_fixed_filling(L, chi, filling_target, U=1, t=1, V=0, V_sep=None):
 	filling = N_up + N_down
 
 	return E, psi, filling
+
+
+def get_finite_dmrg_density_wave_observable(
+	L,
+	chi,
+	U=1,
+	t=1,
+	mu=0,
+	V=0,
+	V_sep=None,
+	*,
+	filling_target=None,
+	dmrg_fixed_filling: bool = False,
+	return_profile: bool = False,
+):
+	if V_sep is None:
+		raise ValueError("V_sep must be provided to define rho_Q.")
+
+	if dmrg_fixed_filling:
+		if filling_target is None:
+			raise ValueError("filling_target must be provided when dmrg_fixed_filling=True.")
+		_, psi, _ = get_gnd_fixed_filling(
+			L,
+			chi,
+			filling_target,
+			U,
+			t,
+			V,
+			V_sep,
+		)
+	else:
+		_, psi, _ = get_gnd(
+			L,
+			chi,
+			U,
+			t,
+			mu,
+			V,
+			V_sep,
+		)
+
+	density_profile = np.array([
+		float(np.real(psi.expectation_value('Nu', site) + psi.expectation_value('Nd', site)))
+		for site in range(L)
+	], dtype=float)
+
+	p, q = map(int, V_sep)
+	Q = 2 * np.pi * p / q
+	site_indices = np.arange(density_profile.size)
+	rho_q = float(np.abs(np.mean(np.exp(1j * Q * site_indices) * density_profile)))
+
+	if return_profile:
+		return rho_q, density_profile
+	return rho_q
+
+
+def _resolve_bulk_sites(L: int, bulk_slice=None) -> np.ndarray:
+	if bulk_slice is None:
+		if L < 8:
+			return np.arange(L, dtype=int)
+		start = L // 4
+		stop = L - start
+		return np.arange(start, stop, dtype=int)
+	if isinstance(bulk_slice, slice):
+		return np.arange(L, dtype=int)[bulk_slice]
+	if isinstance(bulk_slice, tuple) and len(bulk_slice) == 2:
+		start, stop = bulk_slice
+		return np.arange(int(start), int(stop), dtype=int)
+	sites = np.asarray(bulk_slice, dtype=int)
+	if sites.ndim != 1:
+		raise ValueError(f"bulk_slice must resolve to a 1-D list of sites, got shape {sites.shape}")
+	return sites
+
+
+def _get_finite_dmrg_ground_state(
+	L,
+	chi,
+	*,
+	U=1,
+	t=1,
+	mu=0,
+	V=0,
+	V_sep=None,
+	filling_target=None,
+	dmrg_fixed_filling: bool = False,
+):
+	if dmrg_fixed_filling:
+		if filling_target is None:
+			raise ValueError("filling_target must be provided when dmrg_fixed_filling=True.")
+		return get_gnd_fixed_filling(
+			L,
+			chi,
+			filling_target,
+			U,
+			t,
+			V,
+			V_sep,
+		)
+	return get_gnd(
+		L,
+		chi,
+		U,
+		t,
+		mu,
+		V,
+		V_sep,
+	)
+
+
+def get_dmrg_static_structure_factors(
+	L,
+	chi,
+	*,
+	U=1,
+	t=1,
+	mu=0,
+	V=0,
+	V_sep=None,
+	filling_target=None,
+	dmrg_fixed_filling: bool = False,
+	q_values: Optional[Sequence[float]] = None,
+	bulk_slice=None,
+	return_correlators: bool = False,
+):
+	_, psi, filling = _get_finite_dmrg_ground_state(
+		L,
+		chi,
+		U=U,
+		t=t,
+		mu=mu,
+		V=V,
+		V_sep=V_sep,
+		filling_target=filling_target,
+		dmrg_fixed_filling=dmrg_fixed_filling,
+	)
+
+	all_sites = np.arange(L, dtype=int)
+	bulk_sites = _resolve_bulk_sites(L, bulk_slice)
+	if bulk_sites.size == 0:
+		raise ValueError("bulk_slice resolved to zero sites.")
+
+	n_up = np.array([float(np.real(psi.expectation_value('Nu', i))) for i in all_sites], dtype=float)
+	n_down = np.array([float(np.real(psi.expectation_value('Nd', i))) for i in all_sites], dtype=float)
+	n_total = n_up + n_down
+	sz_profile = 0.5 * (n_up - n_down)
+
+	sites_list = bulk_sites.tolist()
+	nu_nu = np.asarray(psi.correlation_function('Nu', 'Nu', sites1=sites_list, sites2=sites_list), dtype=complex)
+	nu_nd = np.asarray(psi.correlation_function('Nu', 'Nd', sites1=sites_list, sites2=sites_list), dtype=complex)
+	nd_nu = np.asarray(psi.correlation_function('Nd', 'Nu', sites1=sites_list, sites2=sites_list), dtype=complex)
+	nd_nd = np.asarray(psi.correlation_function('Nd', 'Nd', sites1=sites_list, sites2=sites_list), dtype=complex)
+
+	n_bulk = n_total[bulk_sites]
+	sz_bulk = sz_profile[bulk_sites]
+	charge_corr_raw = np.real(nu_nu + nu_nd + nd_nu + nd_nd)
+	spin_corr_raw = 0.25 * np.real(nu_nu - nu_nd - nd_nu + nd_nd)
+	charge_corr = charge_corr_raw - np.outer(n_bulk, n_bulk)
+	spin_corr = spin_corr_raw - np.outer(sz_bulk, sz_bulk)
+
+	if q_values is None:
+		q_values = 2.0 * np.pi * np.arange(L // 2 + 1, dtype=float) / float(L)
+	else:
+		q_values = np.asarray(q_values, dtype=float)
+
+	positions = bulk_sites.astype(float)
+	norm = float(len(bulk_sites))
+	Nq = np.empty(len(q_values), dtype=float)
+	Sq = np.empty(len(q_values), dtype=float)
+	for idx, q in enumerate(q_values):
+		phase = np.exp(1j * q * (positions[:, np.newaxis] - positions[np.newaxis, :]))
+		Nq[idx] = float(np.real(np.sum(phase * charge_corr)) / norm)
+		Sq[idx] = float(np.real(np.sum(phase * spin_corr)) / norm)
+
+	result = {
+		"q_values": np.asarray(q_values, dtype=float),
+		"Nq": Nq,
+		"Sq": Sq,
+		"density_profile": n_total,
+		"spin_profile": sz_profile,
+		"bulk_sites": bulk_sites,
+		"filling": float(filling),
+	}
+	if return_correlators:
+		result["charge_corr"] = charge_corr
+		result["spin_corr"] = spin_corr
+	return result
 
 # uses iDMRG to get gnd state energy density in thermodynamic limit (L -> \infty)
 # may not be best choice if system is gapless (test it a bit to check)

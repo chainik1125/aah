@@ -120,6 +120,39 @@ def get_general_expectations(
 	return system_expectations,cluster_expectations
 
 
+def get_general_density_wave_observable(
+	run_config: ClusterModelConfig,
+	*,
+	set_filling: float | None = None,
+	temperature: float = 1e-2,
+	mu_eff: float | None = None,
+	return_profile: bool = False,
+):
+	spectra_4tuple = get_general_spectra(run_config)
+	_, energy_spectrum, number_spectrum, _ = spectra_4tuple
+	physical_params = run_config.physical_params
+
+	full_spectrum_obj = FullSpectrum(None, None, physical_params, None)
+	weighted_density_profiles = full_spectrum_obj.get_weighted_observable(
+		energy_spectrum,
+		number_spectrum,
+		number_spectrum,
+		temperature=temperature,
+		target_filling=set_filling,
+		mu_eff=mu_eff,
+	)
+	average_profile = np.asarray(np.mean(weighted_density_profiles, axis=0), dtype=float)
+
+	p, q = run_config.V_separation_ratio
+	Q = 2 * np.pi * p / q
+	site_indices = np.arange(average_profile.size)
+	rho_q = float(np.abs(np.mean(np.exp(1j * Q * site_indices) * average_profile)))
+
+	if return_profile:
+		return rho_q, average_profile
+	return rho_q
+
+
 
 
 def test_quick_mismatched(lattice_points,cluster_size,physical_params,ham_lib:str='tenpy'):

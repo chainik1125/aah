@@ -595,6 +595,233 @@ class FullSpectrum():
 			return ham_objects
 		else:
 			return k_points,energy_spectrum,number_spectrum,spin_spectrum
+
+	def _normalize_thermodynamic_inputs(
+		self,
+		total_energy_spectrum: np.ndarray,
+		total_number_spectrum: np.ndarray,
+		temperature: Union[None, float],
+	):
+		if temperature is None:
+			temperature = 1e-12
+		if temperature <= 0:
+			raise ValueError(f"temperature must be > 0, got {temperature}")
+
+		total_energy_spectrum = np.asarray(total_energy_spectrum, dtype=float)
+		total_number_spectrum = np.asarray(total_number_spectrum, dtype=float)
+		if total_energy_spectrum.ndim != 2:
+			raise ValueError(
+				f"total_energy_spectrum must have shape (num_superclusters, states), got {total_energy_spectrum.shape}"
+			)
+		if total_number_spectrum.ndim < 3:
+			raise ValueError(
+				f"total_number_spectrum must have shape (num_superclusters, states, ...), got {total_number_spectrum.shape}"
+			)
+		if total_number_spectrum.shape[:2] != total_energy_spectrum.shape:
+			raise ValueError(
+				"total_energy_spectrum and total_number_spectrum must agree in their first two axes, "
+				f"got {total_energy_spectrum.shape} and {total_number_spectrum.shape}"
+			)
+
+		number_spectrum_site_sum = total_number_spectrum.sum(axis=-1)
+		num_cluster_sites = total_number_spectrum.shape[-1]
+		return total_energy_spectrum, total_number_spectrum, number_spectrum_site_sum, num_cluster_sites, float(temperature)
+
+	def _calculate_grand_canonical_weights(
+		self,
+		total_energy_spectrum: np.ndarray,
+		number_spectrum_site_sum: np.ndarray,
+		temperature: float,
+		mu_eff_value: Union[float, np.ndarray],
+	):
+		mu_eff_value_arr = np.asarray(mu_eff_value, dtype=float)
+		if mu_eff_value_arr.ndim == 0:
+			mu_delta = float(mu_eff_value_arr) - self.physical_params.mu_0
+		else:
+			expected_shape = (number_spectrum_site_sum.shape[0],)
+			if mu_eff_value_arr.shape != expected_shape:
+				raise ValueError(
+					f"mu_eff must be scalar or shape {expected_shape}, got {mu_eff_value_arr.shape}"
+				)
+			mu_delta = mu_eff_value_arr[:, np.newaxis] - self.physical_params.mu_0
+
+		beta = 1.0 / temperature
+		gcp_energies = total_energy_spectrum - (mu_delta * number_spectrum_site_sum)
+		log_weights = -beta * gcp_energies
+		shift = np.max(log_weights, axis=-1, keepdims=True)
+		weights = np.exp(log_weights - shift)
+		partition = np.sum(weights, axis=-1)
+		return weights, partition
+
+	def _average_observable_from_weights(
+		self,
+		weights: np.ndarray,
+		partition: np.ndarray,
+		observable_spectrum: np.ndarray,
+	):
+		observable_arr = np.asarray(observable_spectrum)
+		if observable_arr.ndim < 2:
+			raise ValueError(
+				f"observable_spectrum must have at least 2 dimensions, got {observable_arr.shape}"
+			)
+		if observable_arr.shape[:2] != weights.shape:
+			raise ValueError(
+				f"observable_spectrum must start with shape {weights.shape}, got {observable_arr.shape}"
+			)
+
+		weight_shape = weights.shape + (1,) * (observable_arr.ndim - 2)
+		weighted_sum = np.sum(weights.reshape(weight_shape) * observable_arr, axis=1)
+		partition_shape = partition.shape + (1,) * (observable_arr.ndim - 2)
+		return weighted_sum / partition.reshape(partition_shape)
+
+	def _bracket_monotone_root(self, g, x0: float, step0: float = 1.0, max_expand: int = 60):
+		g0 = g(x0)
+		if g0 == 0:
+			return x0, x0
+		step = step0
+		if g0 > 0:
+			x_hi = x0
+			for _ in range(max_expand):
+				x_lo = x0 - step
+				g_lo = g(x_lo)
+				if g_lo <= 0:
+					return x_lo, x_hi
+				step *= 2.0
+		else:
+			x_lo = x0
+			for _ in range(max_expand):
+				x_hi = x0 + step
+				g_hi = g(x_hi)
+				if g_hi >= 0:
+					return x_lo, x_hi
+				step *= 2.0
+		raise ValueError("Failed to bracket monotone root (target filling likely out of range).")
+
+	def _resolve_mu_eff(
+		self,
+		total_energy_spectrum: np.ndarray,
+		number_spectrum_site_sum: np.ndarray,
+		num_cluster_sites: int,
+		temperature: float,
+		target_filling: Union[float, None] = None,
+		mu_eff: Union[float, None] = None,
+	):
+		mu_eff_by_supercluster = None
+		mu_eff_used = self.physical_params.mu_0
+
+		if mu_eff is not None:
+			mu_eff_used = float(mu_eff)
+		elif target_filling is not None:
+			target_filling = float(target_filling)
+			if not np.isfinite(target_filling):
+				raise ValueError(f"target_filling must be finite, got {target_filling}")
+
+			num_superclusters = total_energy_spectrum.shape[0]
+			total_num_sites = float(num_superclusters * num_cluster_sites)
+
+			min_N_total = float(np.min(number_spectrum_site_sum, axis=-1).sum())
+			max_N_total = float(np.max(number_spectrum_site_sum, axis=-1).sum())
+			min_fill = min_N_total / total_num_sites
+			max_fill = max_N_total / total_num_sites
+			if target_filling < min_fill or target_filling > max_fill:
+				raise ValueError(
+					f"Target filling {target_filling} out of range for the retained spectra: "
+					f"[{min_fill}, {max_fill}]"
+				)
+
+			mu0_guess = float(self.physical_params.mu_0)
+			xtol = 1e-7
+			maxiter = 200
+
+			def g(mu_value: float) -> float:
+				weights, partition = self._calculate_grand_canonical_weights(
+					total_energy_spectrum,
+					number_spectrum_site_sum,
+					temperature,
+					mu_value,
+				)
+				n_expect_by_sc = self._average_observable_from_weights(
+					weights,
+					partition,
+					number_spectrum_site_sum,
+				)
+				n_expect_total = float(np.sum(n_expect_by_sc))
+				return (n_expect_total / total_num_sites) - target_filling
+
+			mu_lo, mu_hi = self._bracket_monotone_root(g, mu0_guess)
+			if mu_lo == mu_hi:
+				mu_eff_used = float(mu_lo)
+			else:
+				mu_eff_used = float(bisect(g, mu_lo, mu_hi, xtol=xtol, maxiter=maxiter))
+			logger.info(f"mu_eff(global) = {mu_eff_used}")
+
+		return mu_eff_used, mu_eff_by_supercluster, target_filling
+
+	def _get_thermodynamic_state(
+		self,
+		total_energy_spectrum: np.ndarray,
+		total_number_spectrum: np.ndarray,
+		temperature: Union[None, float] = 1e-8,
+		target_filling: Union[float, None] = None,
+		mu_eff: Union[float, None] = None,
+	):
+		(
+			total_energy_spectrum,
+			total_number_spectrum,
+			number_spectrum_site_sum,
+			num_cluster_sites,
+			temperature,
+		) = self._normalize_thermodynamic_inputs(
+			total_energy_spectrum,
+			total_number_spectrum,
+			temperature,
+		)
+
+		mu_eff_used, mu_eff_by_supercluster, target_filling = self._resolve_mu_eff(
+			total_energy_spectrum,
+			number_spectrum_site_sum,
+			num_cluster_sites,
+			temperature,
+			target_filling=target_filling,
+			mu_eff=mu_eff,
+		)
+
+		mu_for_expectations: Union[float, np.ndarray] = mu_eff_used
+		if mu_eff is None and mu_eff_by_supercluster is not None:
+			mu_for_expectations = mu_eff_by_supercluster
+
+		weights, partition = self._calculate_grand_canonical_weights(
+			total_energy_spectrum,
+			number_spectrum_site_sum,
+			temperature,
+			mu_for_expectations,
+		)
+
+		self.last_mu_eff = mu_eff_used
+		self.last_mu_eff_by_supercluster = mu_eff_by_supercluster
+		self.last_target_filling = target_filling
+		self.last_temperature = temperature
+
+		return total_energy_spectrum, total_number_spectrum, number_spectrum_site_sum, weights, partition
+
+	def get_weighted_observable(
+		self,
+		total_energy_spectrum: np.ndarray,
+		total_number_spectrum: np.ndarray,
+		observable_spectrum: np.ndarray,
+		*,
+		temperature: Union[None, float] = 1e-8,
+		target_filling: Union[float, None] = None,
+		mu_eff: Union[float, None] = None,
+	):
+		total_energy_spectrum, total_number_spectrum, _, weights, partition = self._get_thermodynamic_state(
+			total_energy_spectrum,
+			total_number_spectrum,
+			temperature=temperature,
+			target_filling=target_filling,
+			mu_eff=mu_eff,
+		)
+		return self._average_observable_from_weights(weights, partition, observable_spectrum)
 	
 	def set_mu_fix_filling(
 		self,
@@ -620,119 +847,34 @@ class FullSpectrum():
 			ground_state_spins: Spin expectations for the ground state
 		"""
 		
-		if temperature is None:
-			temperature = 1e-12
-		if temperature <= 0:
-			raise ValueError(f"temperature must be > 0, got {temperature}")
+		total_energy_spectrum, total_number_spectrum, number_spectrum_site_sum, weights, partition = self._get_thermodynamic_state(
+			total_energy_spectrum,
+			total_number_spectrum,
+			temperature=temperature,
+			target_filling=target_filling,
+			mu_eff=mu_eff,
+		)
 
-		num_cluster_sites = total_number_spectrum.shape[-1]
-		number_spectrum_site_sum = total_number_spectrum.sum(axis=-1)  # (num_superclusters, states_retained)
-
-		# 1) Expectation values at a specified chemical potential mu_eff.
-		def calculate_observable(mu_eff_value: Union[float, np.ndarray], observable_spectrum: np.ndarray) -> np.ndarray:
-			mu_eff_value_arr = np.asarray(mu_eff_value, dtype=float)
-			if mu_eff_value_arr.ndim == 0:
-				mu_delta = float(mu_eff_value_arr) - self.physical_params.mu_0
-			else:
-				if mu_eff_value_arr.shape != (number_spectrum_site_sum.shape[0],):
-					raise ValueError(
-						f"mu_eff must be scalar or shape {(number_spectrum_site_sum.shape[0],)}, got {mu_eff_value_arr.shape}"
-					)
-				mu_delta = mu_eff_value_arr[:, np.newaxis] - self.physical_params.mu_0
-			beta = 1.0 / float(temperature)
-			gcp_energies = total_energy_spectrum - (mu_delta * number_spectrum_site_sum)
-			log_weights = -beta * gcp_energies
-			shift = np.max(log_weights, axis=-1, keepdims=True)
-			weights = np.exp(log_weights - shift)
-			Z = np.sum(weights, axis=-1, keepdims=True)
-			numerator = np.sum(weights * observable_spectrum, axis=-1, keepdims=True)
-			return (numerator / Z)[:, 0]
-		
-		# 2) Optionally solve for a *single global* mu by targeting a per-site filling.
-		#    Note: solving a separate mu per supercluster enforces the filling constraint
-		#    locally (per supercluster) and is not the intended semantics for set_filling.
-		mu_eff_by_supercluster = None
-		mu_eff_used = self.physical_params.mu_0
-
-		if mu_eff is not None:
-			mu_eff_used = float(mu_eff)
-		elif target_filling is not None:
-			target_filling = float(target_filling)
-			if not np.isfinite(target_filling):
-				raise ValueError(f"target_filling must be finite, got {target_filling}")
-
-			def bracket_monotone_root(g, x0: float, step0: float = 1.0, max_expand: int = 60):
-				g0 = g(x0)
-				if g0 == 0:
-					return x0, x0
-				step = step0
-				if g0 > 0:
-					# Need smaller x.
-					x_hi = x0
-					for _ in range(max_expand):
-						x_lo = x0 - step
-						g_lo = g(x_lo)
-						if g_lo <= 0:
-							return x_lo, x_hi
-						step *= 2.0
-				else:
-					# Need larger x.
-					x_lo = x0
-					for _ in range(max_expand):
-						x_hi = x0 + step
-						g_hi = g(x_hi)
-						if g_hi >= 0:
-							return x_lo, x_hi
-						step *= 2.0
-				raise ValueError("Failed to bracket monotone root (target filling likely out of range).")
-
-			num_superclusters = total_energy_spectrum.shape[0]
-			total_num_sites = float(num_superclusters * num_cluster_sites)
-
-			# Quick reachability check (within the retained spectra).
-			min_N_total = float(np.min(number_spectrum_site_sum, axis=-1).sum())
-			max_N_total = float(np.max(number_spectrum_site_sum, axis=-1).sum())
-			min_fill = min_N_total / total_num_sites
-			max_fill = max_N_total / total_num_sites
-			if target_filling < min_fill or target_filling > max_fill:
-				raise ValueError(
-					f"Target filling {target_filling} out of range for the retained spectra: "
-					f"[{min_fill}, {max_fill}]"
-				)
-
-			mu0_guess = float(self.physical_params.mu_0)
-			xtol = 1e-7
-			maxiter = 200
-
-			def g(mu_value: float) -> float:
-				n_expect_by_sc = calculate_observable(mu_value, number_spectrum_site_sum)
-				n_expect_total = float(np.sum(n_expect_by_sc))
-				return (n_expect_total / total_num_sites) - target_filling
-
-			mu_lo, mu_hi = bracket_monotone_root(g, mu0_guess)
-			if mu_lo == mu_hi:
-				mu_eff_used = float(mu_lo)
-			else:
-				mu_eff_used = float(bisect(g, mu_lo, mu_hi, xtol=xtol, maxiter=maxiter))
-			logger.info(f"mu_eff(global) = {mu_eff_used}")
-
-		self.last_mu_eff = mu_eff_used
-		self.last_mu_eff_by_supercluster = mu_eff_by_supercluster
-		self.last_target_filling = target_filling
-		self.last_temperature = temperature
-
-		# 3) Thermodynamic expectations at the selected mu.
-		mu_for_expectations: Union[float, np.ndarray] = mu_eff_used
-		if mu_eff is None and mu_eff_by_supercluster is not None:
-			mu_for_expectations = mu_eff_by_supercluster
-		system_energy_expectation = calculate_observable(mu_for_expectations, total_energy_spectrum).sum()
-		system_number_expectation = calculate_observable(mu_for_expectations, number_spectrum_site_sum).sum()
+		system_energy_expectation = self._average_observable_from_weights(
+			weights,
+			partition,
+			total_energy_spectrum,
+		).sum()
+		system_number_expectation = self._average_observable_from_weights(
+			weights,
+			partition,
+			number_spectrum_site_sum,
+		).sum()
 		
 		spin_multiplier = np.array([1, -1])  # (+1)*up + (-1)*down
 		spin_input = total_spin_spectrum * spin_multiplier[np.newaxis, :, np.newaxis, np.newaxis]
 		summed_spin_input = spin_input.sum(axis=1)
 		site_summed_spin_input = summed_spin_input.sum(axis=-1)
-		system_spin_expectation = calculate_observable(mu_for_expectations, site_summed_spin_input).sum()
+		system_spin_expectation = self._average_observable_from_weights(
+			weights,
+			partition,
+			site_summed_spin_input,
+		).sum()
 		
 		return system_energy_expectation, system_number_expectation, system_spin_expectation
 	

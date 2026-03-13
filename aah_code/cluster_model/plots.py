@@ -18,8 +18,16 @@ from pathlib import Path
 
 from aah_code.cluster_model.model import ClusterModelConfig, PhysicalParams
 from aah_code.cluster_model.clustering import generate_clusters
-from aah_code.cluster_model.run_scripts_me import get_general_expectations
-from aah_code.real_space_dmrg import run_dmrg_method, get_gnd, get_gnd_fixed_filling
+from aah_code.cluster_model.run_scripts_me import (
+    get_general_expectations,
+    get_general_density_wave_observable,
+)
+from aah_code.real_space_dmrg import (
+    run_dmrg_method,
+    get_gnd,
+    get_gnd_fixed_filling,
+    get_finite_dmrg_density_wave_observable,
+)
 
 # Configure plotly to work outside of notebooks
 pio.renderers.default = "browser"
@@ -1738,6 +1746,539 @@ if __name__ == "__main__":
         chi=32,
         show_plots=True
     )
+
+
+def create_u_value_rho_q_plots(
+    u_list: Sequence[float],
+    v_list: Sequence[float],
+    cluster_sizes: Sequence[int],
+    cluster_rho_q: Dict[Tuple[int, float], np.ndarray],
+    finite_dmrg_rho_q: np.ndarray,
+    *,
+    v_sep_ratio: Tuple[int, int],
+    t: float,
+    L: int,
+    chi: int,
+    states_retained: int,
+    color_map: Dict[int, str],
+    output_dir: str,
+    filename_prefix: str,
+    timestamp: str,
+    show_plots: bool,
+    save_html: bool,
+    set_filling: Optional[float] = None,
+    mu_source_Nc: Optional[int] = None,
+    dmrg_fixed_filling: bool = False,
+):
+    os.makedirs(output_dir, exist_ok=True)
+
+    n_v_per_fig = 3
+    n_figures = int(np.ceil(len(v_list) / n_v_per_fig))
+    figures: List[go.Figure] = []
+    html_paths: List[str] = []
+    v_to_index = {V: idx for idx, V in enumerate(v_list)}
+
+    for fig_idx in range(n_figures):
+        start = fig_idx * n_v_per_fig
+        end = min(start + n_v_per_fig, len(v_list))
+        current_vs = v_list[start:end]
+        n_cols = len(current_vs)
+
+        fig = make_subplots(
+            rows=1,
+            cols=n_cols,
+            subplot_titles=[f"rho_Q: V = {V:.3g}" for V in current_vs],
+            horizontal_spacing=0.08,
+        )
+
+        any_trace = False
+        for col_idx, V in enumerate(current_vs):
+            col = col_idx + 1
+            v_idx = v_to_index[V]
+
+            finite_series = finite_dmrg_rho_q[:, v_idx]
+            if np.any(np.isfinite(finite_series)):
+                finite_label = "Finite DMRG (fixed N)" if dmrg_fixed_filling else "Finite DMRG"
+                fig.add_trace(
+                    go.Scatter(
+                        x=u_list,
+                        y=finite_series,
+                        mode='lines+markers',
+                        name=finite_label,
+                        legendgroup=finite_label,
+                        marker=dict(color='gray', size=6, symbol='cross'),
+                        line=dict(color='gray', width=2, dash='dot'),
+                        showlegend=(col_idx == 0),
+                        hovertemplate="U=%{x:.3g}<br>rho_Q=%{y:.6f}<extra></extra>",
+                    ),
+                    row=1,
+                    col=col,
+                )
+                any_trace = True
+
+            for Nc in cluster_sizes:
+                cluster_series = cluster_rho_q[(Nc, V)]
+                xs, ys, hover_text = [], [], []
+                for u_idx, U in enumerate(u_list):
+                    rho_q = cluster_series[u_idx]
+                    if not np.isfinite(rho_q):
+                        continue
+                    xs.append(U)
+                    ys.append(rho_q)
+                    hover_text.append(
+                        f"U={U:.3g}<br>V={V:.3g}<br>Nc={Nc}<br>rho_Q={rho_q:.6f}"
+                    )
+
+                if not xs:
+                    continue
+
+                fig.add_trace(
+                    go.Scatter(
+                        x=xs,
+                        y=ys,
+                        mode='lines+markers',
+                        name=f"Nc={Nc}",
+                        legendgroup=f"Nc={Nc}",
+                        marker=dict(color=color_map[Nc], size=8),
+                        line=dict(color=color_map[Nc], width=2),
+                        showlegend=(col_idx == 0),
+                        hovertemplate="%{text}<extra></extra>",
+                        text=hover_text,
+                    ),
+                    row=1,
+                    col=col,
+                )
+                any_trace = True
+
+            u_critical = V / 2.0
+            if col == 1:
+                fig.add_trace(
+                    go.Scatter(
+                        x=[u_critical],
+                        y=[None],
+                        mode='lines',
+                        name='U=V/2',
+                        line=dict(color='gray', dash='dot', width=1),
+                        showlegend=True,
+                        hoverinfo='skip',
+                    ),
+                    row=1,
+                    col=col,
+                )
+
+            fig.add_vline(
+                x=u_critical,
+                row=1,
+                col=col,
+                line_dash="dot",
+                line_color="gray",
+                line_width=1,
+                annotation_text=None,
+            )
+
+            fig.update_xaxes(title_text="U", row=1, col=col)
+            fig.update_yaxes(title_text="rho_Q", row=1, col=col, type='linear', tickformat='.4f')
+
+        if not any_trace:
+            raise RuntimeError("No valid data points available to plot rho_Q convergence.")
+
+        v_sep_label = format_sep_as_pi(v_sep_ratio)
+        annotation_parts = [
+            f"v_sep={v_sep_label}",
+            f"t={t}",
+            f"L={L}",
+            f"chi={chi}",
+            f"states={states_retained}",
+        ]
+        if set_filling is not None:
+            annotation_parts.insert(1, f"n_target={set_filling}")
+            if mu_source_Nc is not None:
+                annotation_parts.insert(2, f"mu_from=Nc{mu_source_Nc}")
+            if dmrg_fixed_filling:
+                annotation_parts.insert(3, "finite_DMRG=fixed_N")
+        annotation_text = ", ".join(annotation_parts) + f" | Page {fig_idx + 1}/{n_figures}"
+
+        fig.update_layout(
+            title=dict(
+                text="Density-Wave Amplitude vs U",
+                x=0.5,
+                xanchor='center',
+            ),
+            hovermode='closest',
+            legend_title="Method",
+        )
+        fig.add_annotation(
+            text=annotation_text,
+            x=0.5,
+            xref='paper',
+            y=1.08,
+            yref='paper',
+            showarrow=False,
+            font=dict(size=12, color='gray'),
+        )
+
+        if save_html:
+            html_name = f"{filename_prefix}_L{L}_chi{chi}_{timestamp}_page_{fig_idx + 1}.html"
+            html_path = os.path.join(output_dir, html_name)
+            fig.write_html(html_path)
+            html_paths.append(html_path)
+            print(f"Saved figure to {html_path}")
+
+        if show_plots:
+            fig.show()
+
+        figures.append(fig)
+
+    return figures, html_paths
+
+
+def compare_U_values_rhoQ_with_dmrg(
+    v_sep_ratio: Tuple[int, int],
+    int_sep_ratios: Union[Tuple[int, int], Dict[int, Tuple[int, int]]],
+    cluster_sizes: Sequence[int],
+    U_values: Sequence[float],
+    V_values: Sequence[float],
+    *,
+    t: float = 1.0,
+    L: int = 20,
+    chi: int = 32,
+    solver_method: str = 'dense_ED',
+    states_retained: int = 4,
+    output_dir: str = 'large_files/plots',
+    show_plots: bool = True,
+    save_html: bool = True,
+    save_data: bool = True,
+    filename_prefix: str = 'U_value_rho_q_comparison',
+    set_filling: Optional[float] = None,
+    dmrg_fixed_filling: bool = False,
+    results: Optional[Union[Dict, str, os.PathLike]] = None,
+) -> Tuple[go.Figure, Dict]:
+    if t is None:
+        raise ValueError("Parameter t must be specified for the cluster calculations.")
+    if dmrg_fixed_filling and set_filling is None:
+        raise ValueError("dmrg_fixed_filling=True requires set_filling to be provided.")
+
+    def _coerce_ratio(value, label: str) -> Tuple[int, int]:
+        if value is None:
+            raise ValueError(f"{label} ratio must be provided.")
+        if isinstance(value, np.ndarray):
+            value = value.tolist()
+        if not isinstance(value, (list, tuple)) or len(value) != 2:
+            raise ValueError(f"{label} ratio must be a length-2 iterable, got {value!r}.")
+        try:
+            p = int(round(value[0]))
+            q = int(round(value[1]))
+        except Exception as exc:
+            raise ValueError(f"Could not parse {label} ratio {value!r} into integers.") from exc
+        if q == 0:
+            raise ValueError(f"Denominator for {label} ratio cannot be zero.")
+        return (p, q)
+
+    cluster_sizes = sorted({int(size) for size in cluster_sizes})
+    if not cluster_sizes:
+        raise ValueError("Provide at least one cluster size (N_c).")
+
+    U_values = np.asarray(U_values, dtype=float)
+    V_values = np.asarray(V_values, dtype=float)
+    if U_values.ndim != 1 or U_values.size == 0:
+        raise ValueError("U_values must be a 1-D array with at least one entry.")
+    if V_values.ndim != 1 or V_values.size == 0:
+        raise ValueError("V_values must be a 1-D array with at least one entry.")
+
+    u_list = [float(u) for u in U_values]
+    v_list = [float(v) for v in V_values]
+    v_sep_ratio = _coerce_ratio(v_sep_ratio, "V separation")
+
+    if isinstance(int_sep_ratios, dict):
+        ratio_map: Dict[int, Tuple[int, int]] = {}
+        for Nc in cluster_sizes:
+            if Nc not in int_sep_ratios:
+                raise ValueError(f"No int_sep ratio provided for cluster size Nc={Nc}.")
+            ratio_map[Nc] = _coerce_ratio(int_sep_ratios[Nc], f"int_sep (Nc={Nc})")
+    else:
+        common_ratio = _coerce_ratio(int_sep_ratios, "int_sep")
+        ratio_map = {Nc: common_ratio for Nc in cluster_sizes}
+
+    failed_calculations: List[Dict] = []
+    mu_source_Nc = max(cluster_sizes) if set_filling is not None else None
+
+    if results is not None:
+        if isinstance(results, (str, os.PathLike)):
+            results_path = Path(results)
+            if not results_path.exists():
+                raise ValueError(f"Results file not found: {results_path}")
+            with open(results_path, 'rb') as fh:
+                results = pickle.load(fh)
+        elif not isinstance(results, dict):
+            raise ValueError("results must be a dict or path-like object when provided.")
+
+        save_data = False
+        print("Using precomputed results payload; skipping new simulations.")
+        params = results.get('parameters', {})
+        stored_set_filling = params.get('set_filling', set_filling)
+        set_filling = float(stored_set_filling) if stored_set_filling is not None else None
+        dmrg_fixed_filling = bool(params.get('dmrg_fixed_filling', dmrg_fixed_filling))
+        mu_source_Nc = max(cluster_sizes) if set_filling is not None else None
+
+        finite_dmrg_rho_q = np.asarray(results.get('finite_dmrg_rho_q', []), dtype=float)
+        if finite_dmrg_rho_q.size == 0:
+            finite_dmrg_rho_q = np.full((len(u_list), len(v_list)), np.nan, dtype=float)
+
+        serialized_clusters = results.get('cluster_rho_q', {})
+        cluster_rho_q: Dict[Tuple[int, float], np.ndarray] = {}
+        for Nc in cluster_sizes:
+            cluster_by_v = serialized_clusters.get(str(Nc)) or serialized_clusters.get(Nc)
+            if cluster_by_v is None:
+                raise ValueError(f"Results payload missing data for cluster size Nc={Nc}.")
+            for V in v_list:
+                series = cluster_by_v.get(str(V)) or cluster_by_v.get(V)
+                if series is None:
+                    raise ValueError(f"Results payload missing rho_Q data for V={V} at Nc={Nc}.")
+                arr = np.asarray(series, dtype=float)
+                if arr.size != len(u_list):
+                    raise ValueError(f"Cluster rho_Q series for Nc={Nc}, V={V} has length {arr.size}, expected {len(u_list)}.")
+                cluster_rho_q[(Nc, V)] = arr
+
+        stored_ratio_map = results.get('int_sep_ratios')
+        if stored_ratio_map:
+            converted_ratio_map = {}
+            for key, val in stored_ratio_map.items():
+                try:
+                    Nc_key = int(key)
+                except (TypeError, ValueError):
+                    Nc_key = key
+                converted_ratio_map[Nc_key] = _coerce_ratio(val, f"int_sep (Nc={Nc_key})")
+            ratio_map = converted_ratio_map
+
+        params_v_sep = params.get('v_sep_ratio', v_sep_ratio)
+        v_sep_ratio = _coerce_ratio(params_v_sep, "V separation")
+        t = params.get('t', t)
+        L = params.get('L', L)
+        chi = params.get('chi', chi)
+        states_retained = params.get('states_retained', states_retained)
+
+        mu_cache = np.asarray(results.get('mu_values', []), dtype=float)
+        if mu_cache.size == 0 or mu_cache.shape != (len(u_list), len(v_list)):
+            mu_cache = np.full((len(u_list), len(v_list)), np.nan, dtype=float)
+    else:
+        cluster_rho_q = {
+            (Nc, V): np.full(len(u_list), np.nan, dtype=float)
+            for Nc in cluster_sizes
+            for V in v_list
+        }
+        finite_dmrg_rho_q = np.full((len(u_list), len(v_list)), np.nan, dtype=float)
+        mu_cache = np.full((len(u_list), len(v_list)), np.nan, dtype=float)
+
+        if set_filling is None:
+            for u_idx, U in enumerate(u_list):
+                mu0_guess = U / 2.0
+                for v_idx in range(len(v_list)):
+                    mu_cache[u_idx, v_idx] = mu0_guess
+        else:
+            print("=" * 60)
+            print(f"Solving mu from cluster filling (Nc={mu_source_Nc}, n_target={set_filling})")
+            print("=" * 60)
+
+            int_sep_ratio = ratio_map[mu_source_Nc]
+            for v_idx, V in enumerate(v_list):
+                for u_idx, U in enumerate(u_list):
+                    mu0_guess = U / 2.0
+                    physical_params = PhysicalParams(U=U, mu_0=mu0_guess, V=V, t=t)
+                    run_config = ClusterModelConfig(
+                        L=L,
+                        int_cluster_size=mu_source_Nc,
+                        cluster_separation_ratio=int_sep_ratio,
+                        V_separation_ratio=v_sep_ratio,
+                        ham_lib='quspin',
+                        physical_params=physical_params,
+                        model_bc='periodic',
+                        int_cluster_bc='periodic',
+                        super_cluster_bc='periodic',
+                        solver_method=solver_method,
+                        states_retained=states_retained,
+                    )
+                    try:
+                        _, _, mu_eff_avg = get_general_expectations(
+                            run_config,
+                            set_filling=set_filling,
+                            return_mu=True,
+                        )
+                        if mu_eff_avg is None or not np.isfinite(mu_eff_avg):
+                            raise ValueError(f"Invalid mu from cluster filling: {mu_eff_avg}")
+                        mu_cache[u_idx, v_idx] = float(mu_eff_avg)
+                    except Exception as exc:
+                        failed_calculations.append({
+                            'method': f'cluster mu (Nc={mu_source_Nc})',
+                            'params': {'U': U, 'V': V},
+                            'error': str(exc),
+                        })
+
+        print("\n")
+        print("=" * 60)
+        print("Running cluster rho_Q calculations for each N_c")
+        print("=" * 60)
+        for Nc in tqdm(cluster_sizes, desc="Cluster sizes", ncols=80):
+            int_sep_ratio = ratio_map[Nc]
+            for v_idx, V in enumerate(v_list):
+                for u_idx, U in enumerate(u_list):
+                    mu0_guess = U / 2.0
+                    physical_params = PhysicalParams(U=U, mu_0=mu0_guess, V=V, t=t)
+                    run_config = ClusterModelConfig(
+                        L=L,
+                        int_cluster_size=Nc,
+                        cluster_separation_ratio=int_sep_ratio,
+                        V_separation_ratio=v_sep_ratio,
+                        ham_lib='quspin',
+                        physical_params=physical_params,
+                        model_bc='periodic',
+                        int_cluster_bc='periodic',
+                        super_cluster_bc='periodic',
+                        solver_method=solver_method,
+                        states_retained=states_retained,
+                    )
+                    try:
+                        if set_filling is None:
+                            rho_q = get_general_density_wave_observable(
+                                run_config,
+                                temperature=1e-2,
+                                mu_eff=float(mu_cache[u_idx, v_idx]),
+                            )
+                        else:
+                            rho_q = get_general_density_wave_observable(
+                                run_config,
+                                temperature=1e-2,
+                                set_filling=set_filling,
+                            )
+                        cluster_rho_q[(Nc, V)][u_idx] = rho_q
+                    except Exception as exc:
+                        failed_calculations.append({
+                            'method': f'cluster rho_Q (Nc={Nc})',
+                            'params': {'U': U, 'V': V},
+                            'error': str(exc),
+                        })
+
+        print("\n")
+        print("=" * 60)
+        print("Computing finite-DMRG rho_Q reference")
+        print("=" * 60)
+        for u_idx, U in enumerate(u_list):
+            for v_idx, V in enumerate(v_list):
+                mu_eff_value = float(mu_cache[u_idx, v_idx])
+                try:
+                    if dmrg_fixed_filling:
+                        rho_q_dmrg = get_finite_dmrg_density_wave_observable(
+                            L,
+                            chi,
+                            U,
+                            t,
+                            0.0,
+                            V,
+                            v_sep_ratio,
+                            filling_target=set_filling,
+                            dmrg_fixed_filling=True,
+                        )
+                    else:
+                        if not np.isfinite(mu_eff_value):
+                            raise ValueError("Skipping finite DMRG: mu was not determined from cluster data.")
+                        rho_q_dmrg = get_finite_dmrg_density_wave_observable(
+                            L,
+                            chi,
+                            U,
+                            t,
+                            mu_eff_value,
+                            V,
+                            v_sep_ratio,
+                        )
+                    finite_dmrg_rho_q[u_idx, v_idx] = rho_q_dmrg
+                except Exception as exc:
+                    failed_calculations.append({
+                        'method': 'Finite DMRG rho_Q',
+                        'params': {'U': U, 'V': V},
+                        'error': str(exc),
+                    })
+
+    color_palette = [
+        '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728',
+        '#9467bd', '#8c564b', '#e377c2', '#7f7f7f',
+        '#bcbd22', '#17becf',
+    ]
+    color_map = {Nc: color_palette[idx % len(color_palette)] for idx, Nc in enumerate(cluster_sizes)}
+
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    figures, html_paths = create_u_value_rho_q_plots(
+        u_list=u_list,
+        v_list=v_list,
+        cluster_sizes=cluster_sizes,
+        cluster_rho_q=cluster_rho_q,
+        finite_dmrg_rho_q=finite_dmrg_rho_q,
+        v_sep_ratio=v_sep_ratio,
+        t=t,
+        L=L,
+        chi=chi,
+        states_retained=states_retained,
+        color_map=color_map,
+        output_dir=output_dir,
+        filename_prefix=filename_prefix,
+        timestamp=timestamp,
+        show_plots=show_plots,
+        save_html=save_html,
+        set_filling=set_filling,
+        mu_source_Nc=mu_source_Nc,
+        dmrg_fixed_filling=dmrg_fixed_filling,
+    )
+    fig = figures[0] if figures else None
+    saved_paths = {}
+    if save_html:
+        saved_paths['html_pages'] = html_paths
+        if html_paths:
+            saved_paths['html'] = html_paths[0]
+
+    cluster_rho_q_serialized = {
+        Nc: {V: cluster_rho_q[(Nc, V)].tolist() for V in v_list}
+        for Nc in cluster_sizes
+    }
+    results_payload = {
+        'cluster_sizes': cluster_sizes,
+        'U_values': u_list,
+        'V_values': v_list,
+        'cluster_rho_q': cluster_rho_q_serialized,
+        'finite_dmrg_rho_q': finite_dmrg_rho_q.tolist(),
+        'mu_values': mu_cache.tolist(),
+        'int_sep_ratios': {Nc: ratio_map[Nc] for Nc in cluster_sizes},
+        'parameters': {
+            'observable': 'rho_Q',
+            'v_sep_ratio': v_sep_ratio,
+            't': t,
+            'L': L,
+            'chi': chi,
+            'solver_method': solver_method,
+            'states_retained': states_retained,
+            'set_filling': set_filling,
+            'dmrg_fixed_filling': dmrg_fixed_filling,
+            'finite_dmrg_only': True,
+        },
+        'artifacts': saved_paths,
+        'failures': failed_calculations,
+    }
+
+    if save_data:
+        pickle_name = f"{filename_prefix}_L{L}_chi{chi}_{timestamp}.pkl"
+        pickle_path = os.path.join(output_dir, pickle_name)
+        with open(pickle_path, 'wb') as fh:
+            pickle.dump(results_payload, fh)
+        saved_paths['pickle'] = pickle_path
+        print(f"Saved data to {pickle_path}")
+
+    if failed_calculations:
+        print("\n" + "=" * 60)
+        print("WARNING: Some calculations failed")
+        print("=" * 60)
+        for failure in failed_calculations:
+            params_desc = ', '.join(f"{k}={v}" for k, v in failure['params'].items())
+            print(f"{failure['method']}: {params_desc}")
+            print(f"  Error: {failure['error'].splitlines()[0]}")
+
+    return fig, results_payload
 
 
 def compare_U_values_with_dmrg(
