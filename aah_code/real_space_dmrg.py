@@ -3,6 +3,7 @@ This file will calculate the real space DMRG to compare with the other values
 """
 
 import logging
+import warnings
 from aah_code.clusters import ClusterExperiment
 from aah_code.basis import LocalClusterBasis
 from aah_code.global_params import StatesParams,HamiltonianParams
@@ -16,6 +17,10 @@ from typing import Union
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from tqdm import tqdm
+
+# Suppress noisy TeNPy warnings about unused config options and unit_cell_width
+warnings.filterwarnings('ignore', message='.*unused options for config.*', category=UserWarning)
+warnings.filterwarnings('ignore', message='.*unit_cell_width is a new argument.*', category=UserWarning)
 
 
 def aah_potential_integer_angle(V, V_sep, L_cells, phi=0.0):
@@ -215,6 +220,10 @@ def get_gnd_infinite(chi, U=1, t=1, mu=0, V=0, V_sep=None):
 	else:
 		# Default unit cell size for standard iDMRG
 		L_V_sep = 2
+
+	# TeNPy's TwoSiteDMRGEngine requires at least 2 sites for sweep schedule
+	if L_V_sep < 2:
+		L_V_sep = 2
 	
 	model = RealSpaceHubbard1D({'L': L_V_sep, 'U':U, 't':t, 'bc':'periodic', 'bc_MPS':'infinite', 'mu':mu, 'V':V, 'V_sep':V_sep})
 	
@@ -249,23 +258,136 @@ def get_gnd_infinite(chi, U=1, t=1, mu=0, V=0, V_sep=None):
 	
 	return E, psi, filling
 
-def run_dmrg_method(U, mu_0, V=0, V_sep=None, t=1, system_size=10, chi=32):
+def compute_correlation_length(psi, return_full=False, num_correlation_lengths=6):
     """
-    Run real-space DMRG calculation
-    
+    Compute correlation length from an iDMRG MPS using the transfer matrix.
+
+    Uses correlation_length2() which calculates correlation lengths from the
+    transfer matrix eigenvalues. For infinite MPS: λ_i = exp(-L/ξ_i).
+
+    Args:
+        psi: TeNPy MPS object (must be infinite, i.e., bc_MPS='infinite')
+        return_full: If True, return dict with multiple correlation lengths and
+                     charge sectors. If False, return just the dominant ξ.
+        num_correlation_lengths: Number of correlation lengths to compute when
+                                 return_full=True (default: 6).
+
+    Returns:
+        If return_full=False:
+            float: Dominant correlation length ξ, or None if computation fails.
+        If return_full=True:
+            dict: {
+                'xi': float (dominant),
+                'xi_all': array (largest correlation lengths),
+                'charges': list (associated charge sectors)
+            } or None if computation fails.
+
+    Note:
+        Currently only the dominant correlation length is stored in results by
+        the plotting functions (compare_filling_cluster_sizes, etc.).
+        TODO: Extend plotting functions to optionally store/display correlation
+        lengths from different charge sectors (e.g., charge vs spin correlations).
+    """
+    try:
+        if return_full:
+            # Get multiple correlation lengths with charge sectors
+            # correlation_length2(target=N, return_charges=True) returns (xi_array, charges)
+            # Use charge_sector=None to search ALL sectors for true dominant ξ
+            xi_all, charges = psi.correlation_length2(
+                target=num_correlation_lengths,
+                charge_sector=None,
+                return_charges=True
+            )
+            xi_all = np.atleast_1d(xi_all)
+            xi_dominant = float(xi_all[0]) if len(xi_all) > 0 else None
+            return {
+                'xi': xi_dominant,
+                'xi_all': np.array(xi_all),
+                'charges': charges,
+            }
+        else:
+            # Just get the dominant correlation length (target=1 returns a scalar)
+            # Use charge_sector=None to search ALL sectors for true dominant ξ
+            xi_dominant = float(psi.correlation_length2(target=1, charge_sector=None))
+            return xi_dominant
+    except Exception as e:
+        logging.warning(f"Failed to compute correlation length: {e}")
+        return None
+
+
+def compute_dmrg_ipr(psi, L=None):
+    """
+    Compute inverse participation ratio (IPR) from site-resolved density.
+
+    IPR = 1 / Σ (n_i / N_total)² where n_i is the occupation at site i.
+    - IPR ≈ 1 means density localized to one site
+    - IPR ≈ L means density uniformly spread
+
+    Args:
+        psi: TeNPy MPS object
+        L: Number of sites (if None, inferred from psi)
+
+    Returns:
+        dict: {'ipr': float, 'density_profile': array} or None if computation fails.
+    """
+    try:
+        if L is None:
+            L = psi.L
+
+        # Compute site-resolved density
+        n_sites = np.array([
+            psi.expectation_value('Nu', [i]) + psi.expectation_value('Nd', [i])
+            for i in range(L)
+        ])
+
+        n_total = np.sum(n_sites)
+        if n_total < 1e-10:
+            return None
+
+        n_normalized = n_sites / n_total
+        ipr = 1.0 / np.sum(n_normalized**2)
+
+        return {'ipr': ipr, 'density_profile': n_sites}
+    except Exception as e:
+        logging.warning(f"Failed to compute DMRG IPR: {e}")
+        return None
+
+
+def run_dmrg_method(U, mu_0, V=0, V_sep=None, t=1, system_size=10, chi=32, compute_localization=False):
+    """
+    Run real-space iDMRG calculation.
+
     Args:
         U: Hubbard interaction strength
         mu_0: Chemical potential
         V: Staggered potential (default 0)
+        V_sep: V modulation ratio tuple (p, q) for period q
         t: Hopping parameter (default 1)
-        system_size: Number of lattice sites
+        system_size: Number of lattice sites (unit cell for iDMRG)
         chi: Bond dimension for DMRG
-    
+        compute_localization: If True, also compute correlation length
+
     Returns:
-        (energy, filling): Total energy and filling
+        If compute_localization=False:
+            (energy, filling, psi): Total energy, filling, and MPS
+        If compute_localization=True:
+            (energy, filling, psi, localization): Also includes dict with 'correlation_length'
     """
     energy, psi, filling = get_gnd_infinite(chi=chi, U=U, t=t, mu=mu_0, V=V, V_sep=V_sep)
-    
+
+    if compute_localization:
+        # Get full correlation length data from correlation_length2()
+        xi_data = compute_correlation_length(psi, return_full=True)
+        if xi_data is not None:
+            localization = {
+                'correlation_length': xi_data['xi'],  # Dominant ξ (backward compatible)
+                'correlation_length_all': xi_data['xi_all'].tolist() if xi_data['xi_all'] is not None else None,
+                'correlation_length_charges': xi_data['charges'],
+            }
+        else:
+            localization = {'correlation_length': None}
+        return energy, filling, psi, localization
+
     return energy, filling, psi
 		
 
