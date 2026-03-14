@@ -64,18 +64,16 @@ def summarize_fill_mode(fill_mode: str, fill_results: dict, U_values: np.ndarray
                 )
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--fig2-cache", type=Path, default=DEFAULT_FIG2_CACHE)
-    parser.add_argument("--cluster-sizes", nargs="+", type=int, default=[2, 4])
-    parser.add_argument("--delta-u", type=float, default=5e-2)
-    parser.add_argument("--N-k", type=int, default=256)
-    parser.add_argument("--N-lam", type=int, default=256)
-    parser.add_argument("--B", type=float, default=20.0)
-    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
-    args = parser.parse_args()
-
-    with args.fig2_cache.open("rb") as fh:
+def compute_fig2_bethe_thermodynamics(
+    *,
+    fig2_cache: Path = DEFAULT_FIG2_CACHE,
+    cluster_sizes: list[int] | tuple[int, ...] = (2, 4),
+    delta_u: float = 5e-2,
+    N_k: int = 256,
+    N_lam: int = 256,
+    B: float = 20.0,
+) -> dict:
+    with fig2_cache.open("rb") as fh:
         fig2_data = pickle.load(fh)
 
     U_values = np.asarray(fig2_data["U_values"], dtype=float)
@@ -95,18 +93,18 @@ def main() -> None:
 
     results = {
         "parameters": {
-            "fig2_cache": str(args.fig2_cache),
+            "fig2_cache": str(fig2_cache),
             "L": L,
             "t": t,
             "V": V,
             "v_sep_ratio": v_sep_ratio,
             "solver_method": solver_method,
             "states_retained": states_retained,
-            "delta_u": args.delta_u,
-            "N_k": args.N_k,
-            "N_lam": args.N_lam,
-            "B": args.B,
-            "cluster_sizes": args.cluster_sizes,
+            "delta_u": delta_u,
+            "N_k": N_k,
+            "N_lam": N_lam,
+            "B": B,
+            "cluster_sizes": list(cluster_sizes),
         },
         "U_values": U_values.tolist(),
         "bethe": {},
@@ -128,16 +126,16 @@ def main() -> None:
                 float(U),
                 n_target,
                 t=t,
-                delta_u=args.delta_u,
-                N_k=args.N_k,
-                N_lam=args.N_lam,
-                B=args.B,
+                delta_u=delta_u,
+                N_k=N_k,
+                N_lam=N_lam,
+                B=B,
             )
             for observable in ba_components:
                 ba_components[observable].append(float(comps[observable]))
         results["bethe"][fill_mode] = ba_components
 
-    for Nc in args.cluster_sizes:
+    for Nc in cluster_sizes:
         Nc_key = str(Nc)
         if Nc_key not in fig2_data["cluster_energies"]:
             raise KeyError(f"Nc={Nc} not present in Fig. 2 cache")
@@ -186,7 +184,7 @@ def main() -> None:
                         v_sep_ratio=v_sep_ratio,
                         solver_method=solver_method,
                         states_retained=states_retained,
-                        delta_u=args.delta_u,
+                        delta_u=delta_u,
                     )
                     for key in ("energy", "double_occupancy", "kinetic", "filling", "mu_eff"):
                         obs[key].append(float(comps[key]))
@@ -219,7 +217,7 @@ def main() -> None:
     for fill_mode in fill_modes:
         summary_payload[fill_mode] = {}
         fill_results = {}
-        for Nc in args.cluster_sizes:
+        for Nc in cluster_sizes:
             Nc_key = str(Nc)
             fill_results[Nc] = {
                 scheme_key: results["cluster"][Nc_key][scheme_key][fill_mode]
@@ -229,10 +227,36 @@ def main() -> None:
         summary_payload[fill_mode] = fill_results
 
     results["summary"] = summary_payload
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    with args.output.open("wb") as fh:
+    return results
+
+
+def save_fig2_bethe_thermodynamics(results: dict, output: Path = DEFAULT_OUTPUT) -> None:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with output.open("wb") as fh:
         pickle.dump(results, fh)
-    print(f"\nSaved analysis payload to {args.output}")
+    print(f"\nSaved analysis payload to {output}")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--fig2-cache", type=Path, default=DEFAULT_FIG2_CACHE)
+    parser.add_argument("--cluster-sizes", nargs="+", type=int, default=[2, 4])
+    parser.add_argument("--delta-u", type=float, default=5e-2)
+    parser.add_argument("--N-k", type=int, default=256)
+    parser.add_argument("--N-lam", type=int, default=256)
+    parser.add_argument("--B", type=float, default=20.0)
+    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    args = parser.parse_args()
+
+    results = compute_fig2_bethe_thermodynamics(
+        fig2_cache=args.fig2_cache,
+        cluster_sizes=args.cluster_sizes,
+        delta_u=args.delta_u,
+        N_k=args.N_k,
+        N_lam=args.N_lam,
+        B=args.B,
+    )
+    save_fig2_bethe_thermodynamics(results, args.output)
 
 
 if __name__ == "__main__":

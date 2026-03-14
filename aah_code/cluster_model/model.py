@@ -23,6 +23,7 @@ class PhysicalParams:
     V:float=0.0
     t:float=1.0
     mu_0:float=0.0
+    twist_phi:float=0.0
 
 @dataclass(frozen=True)
 class ClusterModelConfig:

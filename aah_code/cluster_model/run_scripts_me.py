@@ -22,6 +22,7 @@ def get_general_spectra(run_config:ClusterModelConfig,return_ham:bool=False,timi
 	V=run_config.physical_params.V
 	mu_0=run_config.physical_params.mu_0
 	t=run_config.physical_params.t
+	twist_phi=getattr(run_config.physical_params, "twist_phi", 0.0)
 	L=run_config.L
 	Nc=run_config.int_cluster_size
 	solver_method=run_config.solver_method
@@ -43,7 +44,20 @@ def get_general_spectra(run_config:ClusterModelConfig,return_ham:bool=False,timi
 		print(f'cluster_k: {cluster_k/np.pi}')
 		print(f'cluster_indices: {cluster_indices}')
 		start = time.perf_counter()
-		sc_cluster_ham,sc_cluster_basis=make_cluster_ham(cluster_k_no_last_dim,cluster_indices,t,V,U,mu_0,L,Nc,int_sep_ratio,v_sep_ratio,ham_lib='quspin')
+		sc_cluster_ham,sc_cluster_basis=make_cluster_ham(
+			cluster_k_no_last_dim,
+			cluster_indices,
+			t,
+			V,
+			U,
+			mu_0,
+			L,
+			Nc,
+			int_sep_ratio,
+			v_sep_ratio,
+			ham_lib='quspin',
+			twist_phi=twist_phi,
+		)
 
 		input=(sc_cluster_ham,sc_cluster_basis)	
 	

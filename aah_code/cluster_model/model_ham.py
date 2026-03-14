@@ -55,7 +55,8 @@ def _build_static_terms(supercluster_ks,
                         L,
                         Nc,
                         int_sep_ratio,
-                        v_sep_ratio) -> Tuple[List, int]:
+                        v_sep_ratio,
+                        twist_phi=0.0) -> Tuple[List, int]:
     """Construct quspin static terms and return them along with cluster size."""
     static = []
     super_cluster_size = int(np.prod(supercluster_ks.shape))
@@ -77,7 +78,8 @@ def _build_static_terms(supercluster_ks,
 
     static.extend(v_terms["to_quspin_spinful"])
 
-    t_tilde_terms = alpha_terms_by_separation(supercluster_idxs, supercluster_ks, t, spin='spinful')
+    twisted_supercluster_ks = np.asarray(supercluster_ks, dtype=float) + (float(twist_phi) / float(L))
+    t_tilde_terms = alpha_terms_by_separation(supercluster_idxs, twisted_supercluster_ks, t, spin='spinful')
     t_terms_static: List = []
     for s in sorted(t_tilde_terms.keys()):
         t_terms_static.extend(t_tilde_terms[s])
@@ -106,7 +108,8 @@ def make_cluster_ham(supercluster_ks,
                     int_sep_ratio,
                     v_sep_ratio,
                     ham_lib='quspin',
-                    use_symm=True):
+                    use_symm=True,
+                    twist_phi=0.0):
     """Construct the cluster Hamiltonian, optionally enabling symmetry decomposition."""
 
     static_terms, super_cluster_size = _build_static_terms(
@@ -119,7 +122,8 @@ def make_cluster_ham(supercluster_ks,
         L,
         Nc,
         int_sep_ratio,
-        v_sep_ratio
+        v_sep_ratio,
+        twist_phi=twist_phi,
     )
 
     basis = spinful_fermion_basis_1d(super_cluster_size)
