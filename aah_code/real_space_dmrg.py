@@ -258,6 +258,98 @@ def get_gnd_infinite(chi, U=1, t=1, mu=0, V=0, V_sep=None):
 	
 	return E, psi, filling
 
+def get_gnd_infinite_fixed_filling(chi, filling_target, U=1, t=1, V=0, V_sep=None):
+	"""iDMRG in the canonical ensemble (fixed filling per unit cell).
+
+	Unlike get_gnd_infinite (grand canonical, tunes mu), this function enforces
+	U(1) particle number conservation so the filling is an input, not an output.
+
+	The target filling must be commensurate with the unit cell size, i.e.
+	filling_target * L_unit_cell must be an integer.  For the default 2-site
+	unit cell (V_sep=None), the supported fillings are 0, 0.5, 1.0, 1.5, 2.0.
+
+	Args:
+		chi: Max bond dimension.
+		filling_target: Target filling per site (0 <= n <= 2).
+		U, t, V, V_sep: Model parameters (same conventions as get_gnd_infinite).
+
+	Returns:
+		(E, psi, filling): Energy density, MPS, and measured filling per site.
+	"""
+	if filling_target is None:
+		raise ValueError("filling_target must be provided.")
+	filling_target = float(filling_target)
+
+	# Determine unit cell size (same logic as get_gnd_infinite)
+	if V_sep is not None:
+		L_uc = int(V_sep[1])
+	else:
+		L_uc = 2
+	if L_uc < 2:
+		L_uc = 2
+
+	# Check commensurability
+	N_target_float = filling_target * L_uc
+	N_target = int(round(N_target_float))
+	if abs(N_target_float - N_target) > 1e-6:
+		warnings.warn(
+			f"filling_target={filling_target} is not commensurate with the "
+			f"{L_uc}-site unit cell (need filling * L_uc to be integer). "
+			f"Rounding to N={N_target} particles ({N_target/L_uc:.4f} per site). "
+			f"For arbitrary fillings, use get_gnd_infinite with a tuned chemical "
+			f"potential instead.",
+			UserWarning,
+			stacklevel=2,
+		)
+	N_target = max(0, min(2 * L_uc, N_target))
+
+	# Build initial product state with correct particle count
+	N_up_target = N_target // 2
+	N_down_target = N_target - N_up_target
+
+	min_double_occ = max(0, N_target - L_uc)
+	N_full = min_double_occ
+	N_up_singles = N_up_target - N_full
+	N_down_singles = N_down_target - N_full
+
+	product_state = L_uc * ['empty']
+	idx = 0
+	for _ in range(N_full):
+		product_state[idx] = 'full'
+		idx += 1
+	for _ in range(N_up_singles):
+		product_state[idx] = 'up'
+		idx += 1
+	for _ in range(N_down_singles):
+		product_state[idx] = 'down'
+		idx += 1
+
+	model = RealSpaceHubbard1D({
+		'L': L_uc, 'U': U, 't': t,
+		'bc': 'periodic', 'bc_MPS': 'infinite',
+		'mu': 0.0, 'V': V, 'V_sep': V_sep,
+		'cons_N': 'N', 'cons_Sz': None,
+	})
+
+	psi = tp.MPS.from_product_state(model.lat.mps_sites(), product_state, 'infinite')
+
+	dmrg_params = {
+		'mixer': True,
+		'trunc_params': {'chi_max': chi, 'svd_min': 1e-8},
+		'max_E_err': 1e-8, 'max_S_err': 1e-6,
+		'min_sweeps': 5, 'max_sweeps': 50, 'max_trunc_err': None,
+	}
+
+	engine = tp.TwoSiteDMRGEngine(psi, model, dmrg_params)
+	E, psi = engine.run()
+
+	N_up = np.mean([psi.expectation_value('Nu', i) for i in range(L_uc)])
+	N_down = np.mean([psi.expectation_value('Nd', i) for i in range(L_uc)])
+	filling = N_up + N_down
+
+	return E, psi, filling
+
+
 def compute_correlation_length(psi, return_full=False, num_correlation_lengths=6):
     """
     Compute correlation length from an iDMRG MPS using the transfer matrix.
@@ -390,6 +482,176 @@ def run_dmrg_method(U, mu_0, V=0, V_sep=None, t=1, system_size=10, chi=32, compu
 
     return energy, filling, psi
 		
+
+
+
+# ---------------------------------------------------------------------------
+# PBC (periodic boundary conditions) variants for finite DMRG
+# ---------------------------------------------------------------------------
+# NearestNeighborModel is dropped because the wrap-around coupling (site 0 ↔
+# site L-1) is long-range in the MPS ordering and incompatible with NN-only
+# storage.  The 'folded' site ordering reduces the MPO bond dimension by
+# turning that ultra-long-range bond into a nearest-neighbor one in MPS space.
+# ---------------------------------------------------------------------------
+
+class RealSpaceHubbard1D_PBC(CouplingMPOModel):
+	"""PBC Hubbard chain for finite DMRG.
+
+	Identical Hamiltonian to RealSpaceHubbard1D but with:
+	  - bc='periodic', bc_MPS='finite'
+	  - order='folded' (reduces MPO range)
+	  - No NearestNeighborModel (incompatible with long-range wrap-around)
+	"""
+
+	def init_sites(self, model_params):
+		cons_N = model_params.get('cons_N', None)
+		cons_Sz = model_params.get('cons_Sz', None)
+		site = tp.networks.site.SpinHalfFermionSite(cons_N=cons_N, cons_Sz=cons_Sz)
+		return site
+
+	def init_lattice(self, model_params):
+		L = model_params['L']
+		site = self.init_sites(model_params)
+		lat = lattice.Chain(L=L, bc='periodic', bc_MPS='finite',
+							site=site, order='folded')
+		return lat
+
+	def init_terms(self, model_params):
+		U = model_params.get('U', 1.0)
+		t = model_params.get('t', 1.0)
+		mu = model_params.get('mu', 0.0)
+		V = model_params.get('V', 0.0)
+
+		for u1, u2, dx in self.lat.pairs['nearest_neighbors']:
+			self.add_coupling(t, u1, 'Cdd', u2, 'Cd', dx, plus_hc=True)
+			self.add_coupling(t, u1, 'Cdu', u2, 'Cu', dx, plus_hc=True)
+
+		for v in range(len(self.lat.unit_cell)):
+			self.add_onsite(U, v, 'NuNd')
+			self.add_onsite(-mu, v, 'Nu')
+			self.add_onsite(-mu, v, 'Nd')
+
+		L_cells = self.lat.Ls[0]
+		V_sep = model_params.get('V_sep', None)
+		if V_sep is not None:
+			V_array = aah_potential_integer_angle(V, V_sep, L_cells)
+			for alpha in range(len(self.lat.unit_cell)):
+				self.add_onsite(V_array, alpha, 'Nu')
+				self.add_onsite(V_array, alpha, 'Nd')
+		elif abs(V) > 0:
+			stagger = np.asarray([+V if (x % 2 == 0) else -V
+								  for x in range(L_cells)])
+			for alpha in range(len(self.lat.unit_cell)):
+				self.add_onsite(stagger, alpha, 'Nu')
+				self.add_onsite(stagger, alpha, 'Nd')
+
+
+def get_gnd_pbc(L, chi, U=1, t=1, mu=0, V=0, V_sep=None):
+	"""Finite DMRG with periodic boundary conditions (grand canonical).
+
+	Mirrors get_gnd() but uses PBC with folded site ordering.
+	Returns (E, psi, filling).
+	"""
+	model = RealSpaceHubbard1D_PBC({
+		'L': L, 'U': U, 't': t, 'bc': 'periodic', 'bc_MPS': 'finite',
+		'mu': mu, 'V': V, 'V_sep': V_sep,
+	})
+
+	if mu > U:
+		product_state = L * ['full']
+	elif mu < 0:
+		product_state = L * ['empty']
+	else:
+		product_state = (L // 2) * ['up', 'down']
+
+	psi = tp.MPS.from_product_state(model.lat.mps_sites(), product_state)
+
+	dmrg_params = {
+		'mixer': True,
+		'trunc_params': {'chi_max': chi, 'svd_min': 1e-8},
+		'max_E_err': 1e-8, 'max_S_err': 1e-6,
+		'min_sweeps': 5, 'max_sweeps': 50, 'max_trunc_err': None,
+	}
+
+	engine = tp.TwoSiteDMRGEngine(psi, model, dmrg_params)
+	E, psi = engine.run()
+
+	N_up = np.mean([psi.expectation_value('Nu', i) for i in range(L)])
+	N_down = np.mean([psi.expectation_value('Nd', i) for i in range(L)])
+	filling = N_up + N_down
+
+	return E, psi, filling
+
+
+def get_gnd_fixed_filling_pbc(L, chi, filling_target, U=1, t=1, V=0, V_sep=None):
+	"""Finite DMRG with PBC in the canonical ensemble (fixed total N).
+
+	Mirrors get_gnd_fixed_filling() but uses PBC with folded site ordering.
+	Returns (E, psi, filling).
+	"""
+	if filling_target is None:
+		raise ValueError("filling_target must be provided for fixed-filling DMRG.")
+
+	filling_target = float(filling_target)
+	if not np.isfinite(filling_target):
+		raise ValueError(f"filling_target must be finite, got {filling_target!r}.")
+	if filling_target < -1e-12 or filling_target > 2.0 + 1e-12:
+		raise ValueError(f"filling_target must be between 0 and 2, got {filling_target}.")
+
+	N_target_float = filling_target * L
+	N_target = int(round(N_target_float))
+	N_target = max(0, min(2 * L, N_target))
+
+	N_up_target = N_target // 2
+	N_down_target = N_target - N_up_target
+
+	min_double_occupancies = max(0, N_target - L)
+	if min_double_occupancies > min(N_up_target, N_down_target):
+		raise ValueError(
+			f"Cannot realize N_target={N_target} on L={L} "
+			f"with N_up={N_up_target}, N_down={N_down_target}."
+		)
+
+	N_full = min_double_occupancies
+	N_up_singles = N_up_target - N_full
+	N_down_singles = N_down_target - N_full
+
+	product_state = L * ['empty']
+	idx = 0
+	for _ in range(N_full):
+		product_state[idx] = 'full'
+		idx += 1
+	for _ in range(N_up_singles):
+		product_state[idx] = 'up'
+		idx += 1
+	for _ in range(N_down_singles):
+		product_state[idx] = 'down'
+		idx += 1
+
+	model = RealSpaceHubbard1D_PBC({
+		'L': L, 'U': U, 't': t,
+		'bc': 'periodic', 'bc_MPS': 'finite',
+		'mu': 0.0, 'V': V, 'V_sep': V_sep,
+		'cons_N': 'N', 'cons_Sz': None,
+	})
+
+	psi = tp.MPS.from_product_state(model.lat.mps_sites(), product_state)
+
+	dmrg_params = {
+		'mixer': True,
+		'trunc_params': {'chi_max': chi, 'svd_min': 1e-8},
+		'max_E_err': 1e-8, 'max_S_err': 1e-6,
+		'min_sweeps': 5, 'max_sweeps': 50, 'max_trunc_err': None,
+	}
+
+	engine = tp.TwoSiteDMRGEngine(psi, model, dmrg_params)
+	E, psi = engine.run()
+
+	N_up = np.mean([psi.expectation_value('Nu', i) for i in range(L)])
+	N_down = np.mean([psi.expectation_value('Nd', i) for i in range(L)])
+	filling = N_up + N_down
+
+	return E, psi, filling
 
 if __name__ == "__main__":
 	print('real space dmrg main character')
