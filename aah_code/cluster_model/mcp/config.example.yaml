@@ -1,0 +1,19 @@
+remote:
+  host: "YOUR_HOST_IP"
+  port: 22112
+  user: "root"
+  key_path: "~/.ssh/id_ed25519"
+
+paths:
+  project_root: "/path/to/your/aah"
+  remote_project_root: "~/aah"
+  tex_images: "/path/to/your/tex/images"
+
+rsync:
+  excludes:
+    - ".venv/"
+    - ".git/"
+    - "large_files/"
+    - "__pycache__/"
+    - "*.pyc"
+    - "logs/"

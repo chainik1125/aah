@@ -9,6 +9,9 @@ logs/
 # Large generated files
 *.html
 .DS_Store
+
+# MCP config (contains credentials)
+aah_code/cluster_model/mcp/config.yaml
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
