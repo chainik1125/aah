@@ -99,7 +99,9 @@ class RealSpaceHubbard1D(CouplingMPOModel, NearestNeighborModel):
 
 # chi is bond dimension of MPS (chi ~ log (S_ent))
 # Should check increasing chi to see convergence of E_gnd
-def get_gnd(L, chi, U=1, t=1, mu=0, V=0, V_sep=None):
+def get_gnd(L, chi, U=1, t=1, mu=0, V=0, V_sep=None, bc='open'):
+	if bc == 'periodic':
+		return get_gnd_pbc(L, chi, U=U, t=t, mu=mu, V=V, V_sep=V_sep)
 	# initialize Hamiltonian
 	model = RealSpaceHubbard1D({'L': L, 'U':U, 't':t, 'bc':'open', 'bc_MPS':'finite', 'mu':mu, 'V':V, 'V_sep':V_sep})
 	
@@ -127,7 +129,7 @@ def get_gnd(L, chi, U=1, t=1, mu=0, V=0, V_sep=None):
 	return E, psi, filling
 
 
-def get_gnd_fixed_filling(L, chi, filling_target, U=1, t=1, V=0, V_sep=None):
+def get_gnd_fixed_filling(L, chi, filling_target, U=1, t=1, V=0, V_sep=None, bc='open'):
 	"""
 	Finite DMRG in the canonical ensemble (fixed total particle number).
 
@@ -136,10 +138,13 @@ def get_gnd_fixed_filling(L, chi, filling_target, U=1, t=1, V=0, V_sep=None):
 		chi: Max bond dimension.
 		filling_target: Target filling per site (0 <= n <= 2).
 		U, t, V, V_sep: Model parameters (same conventions as get_gnd).
+		bc: Boundary conditions ('open' or 'periodic').
 
 	Returns:
 		(E, psi, filling): Total ground state energy, MPS, and measured filling per site.
 	"""
+	if bc == 'periodic':
+		return get_gnd_fixed_filling_pbc(L, chi, filling_target, U=U, t=t, V=V, V_sep=V_sep)
 	if filling_target is None:
 		raise ValueError("filling_target must be provided for fixed-filling DMRG.")
 

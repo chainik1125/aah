@@ -4,6 +4,11 @@ wandb/
 .data/
 .checkpoints/
 large_files/
+logs/
+
+# Large generated files
+*.html
+.DS_Store
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

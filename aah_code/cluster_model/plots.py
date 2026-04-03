@@ -2386,6 +2386,7 @@ def compare_filling_with_int_cluster_sizes(
     compute_localization: bool = False,
     results: Optional[Union[Dict, str, os.PathLike]] = None,
     cols_per_page: int = 3,
+    finite_dmrg_bc: str = 'open',
 ) -> Tuple[go.Figure, Dict]:
     """
     Compare half-filling and quarter-filling results across cluster sizes and interaction separations.
@@ -2864,6 +2865,7 @@ def compare_filling_with_int_cluster_sizes(
                                 mu_eff_value,
                                 V,
                                 v_sep_ratio,
+                                bc=finite_dmrg_bc,
                             )
                             energy_finite_per_site = energy_finite / L
                             dmrg_value = energy_finite_per_site + mu_eff_value * filling_finite
@@ -2879,6 +2881,7 @@ def compare_filling_with_int_cluster_sizes(
                                 t,
                                 V,
                                 v_sep_ratio,
+                                bc=finite_dmrg_bc,
                             )
                             energy_finite_per_site = energy_finite / L
                             dmrg_value = energy_finite_per_site
@@ -2894,6 +2897,7 @@ def compare_filling_with_int_cluster_sizes(
                                 mu_eff_value,
                                 V,
                                 v_sep_ratio,
+                                bc=finite_dmrg_bc,
                             )
                             energy_finite_per_site = energy_finite / L
                             dmrg_value = energy_finite_per_site + mu_eff_value * filling_finite

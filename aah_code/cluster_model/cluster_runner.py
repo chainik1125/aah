@@ -175,6 +175,7 @@ def run_filling_with_int_cluster_sizes(args):
         set_filling=args.set_filling,
         dmrg_fixed_filling=args.dmrg_fixed_filling,
         results=args.results,
+        finite_dmrg_bc=args.finite_dmrg_bc,
     )
 
     print("\nDone!")
@@ -529,6 +530,8 @@ def main():
                             help='Use fixed particle number in finite DMRG')
     fwi_parser.add_argument('--no_dmrg_fixed_filling', action='store_false', dest='dmrg_fixed_filling',
                             help='Use grand canonical DMRG')
+    fwi_parser.add_argument('--finite_dmrg_bc', type=str, default='open', choices=['open', 'periodic'],
+                            help='Boundary conditions for finite DMRG (default: open)')
 
     # fixed_supercluster subcommand
     fsc_parser = subparsers.add_parser('fixed_supercluster',
