@@ -1,0 +1,23 @@
+{
+  "tasks": [
+    {
+      "id": "fig5_highU_pbc",
+      "description": "Run Fig 5 appendix: high-U regime with PBC DMRG, L=48",
+      "status": "pending",
+      "command": "fixed_supercluster",
+      "args": {
+        "L": 48,
+        "chi": 32,
+        "U_values": "5,10,20,30",
+        "V_values": "0,1,2,3,4,5",
+        "v_sep_ratio": "1,2",
+        "finite_dmrg_bc": "periodic",
+        "include_finite_dmrg": true,
+        "save_data": true,
+        "n_jobs": 16
+      },
+      "created_at": "2026-04-04",
+      "result": null
+    }
+  ]
+}
