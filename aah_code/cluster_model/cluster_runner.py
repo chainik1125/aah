@@ -176,6 +176,7 @@ def run_filling_with_int_cluster_sizes(args):
         dmrg_fixed_filling=args.dmrg_fixed_filling,
         results=args.results,
         finite_dmrg_bc=args.finite_dmrg_bc,
+        n_jobs=args.n_jobs,
     )
 
     print("\nDone!")
@@ -413,6 +414,7 @@ def run_from_config(config: Dict[str, Any]):
             include_timing=config.get('include_timing', False),
             output_dir=output_dir,
             results=config.get('results'),
+            n_jobs=config.get('n_jobs', 1),
         )
 
     elif command == 'fixed_supercluster':
@@ -506,6 +508,8 @@ def main():
         p.add_argument('--plot_relative_error', action='store_true', help='Plot relative error')
         p.add_argument('--results', type=str, default=None,
                        help='Path to existing results pickle to load instead of computing')
+        p.add_argument('--n_jobs', type=int, default=1,
+                       help='Number of parallel workers for cluster ED (1=serial, -1=all cores)')
 
     # filling_cluster_sizes subcommand
     fcs_parser = subparsers.add_parser('filling_cluster_sizes',

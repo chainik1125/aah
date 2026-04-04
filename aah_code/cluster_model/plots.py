@@ -2359,6 +2359,64 @@ def compare_U_values_with_dmrg(
     return fig, results_payload
 
 
+def _pool_initializer():
+    """Set environment variables in each worker process to avoid thread oversubscription."""
+    os.environ['OMP_NUM_THREADS'] = '1'
+    os.environ['OPENBLAS_NUM_THREADS'] = '1'
+    os.environ['MKL_NUM_THREADS'] = '1'
+    os.environ['NUMEXPR_NUM_THREADS'] = '1'
+    os.environ.setdefault('CUDA_VISIBLE_DEVICES', '-1')
+
+
+def _cluster_ed_worker(args):
+    """Worker function for parallel cluster ED computation.
+
+    Must be at module level for multiprocessing pickling.
+    """
+    (Nc, int_sep, fill_mode, u_idx, U, V, t, L, v_sep_ratio,
+     solver_method, states_retained, target_filling, mu0, use_fixed_mu) = args
+
+    from aah_code.cluster_model.model import ClusterModelConfig, PhysicalParams
+    from aah_code.cluster_model.run_scripts_me import get_general_expectations
+
+    physical_params = PhysicalParams(U=U, mu_0=mu0, V=V, t=t)
+    run_config = ClusterModelConfig(
+        L=L,
+        int_cluster_size=Nc,
+        cluster_separation_ratio=int_sep,
+        V_separation_ratio=v_sep_ratio,
+        ham_lib='quspin',
+        physical_params=physical_params,
+        model_bc='periodic',
+        int_cluster_bc='periodic',
+        super_cluster_bc='periodic',
+        solver_method=solver_method,
+        states_retained=states_retained,
+    )
+
+    try:
+        if use_fixed_mu:
+            system_expectations, _, _ = get_general_expectations(
+                run_config, mu_eff=mu0, return_mu=True,
+            )
+        else:
+            system_expectations, _, _ = get_general_expectations(
+                run_config, set_filling=target_filling, return_mu=True,
+            )
+
+        energy, filling, _ = system_expectations
+        energy_subtracted = (energy + mu0 * filling) / L
+        return (Nc, int_sep, fill_mode, u_idx, energy_subtracted, filling / L, None)
+    except Exception as exc:
+        import traceback
+        return (Nc, int_sep, fill_mode, u_idx, None, None, {
+            'method': f'cluster Nc={Nc}, int_sep={int_sep}, {fill_mode}',
+            'params': {'U': U, 'V': V},
+            'error': str(exc),
+            'traceback': traceback.format_exc(),
+        })
+
+
 def compare_filling_with_int_cluster_sizes(
     int_sep_ratios_by_Nc: Dict[int, Sequence[Tuple[int, int]]],
     U_values: Sequence[float],
@@ -2387,6 +2445,7 @@ def compare_filling_with_int_cluster_sizes(
     results: Optional[Union[Dict, str, os.PathLike]] = None,
     cols_per_page: int = 3,
     finite_dmrg_bc: str = 'open',
+    n_jobs: int = 1,
 ) -> Tuple[go.Figure, Dict]:
     """
     Compare half-filling and quarter-filling results across cluster sizes and interaction separations.
@@ -2666,98 +2725,60 @@ def compare_filling_with_int_cluster_sizes(
         print(f"V = {V}, v_sep = {format_sep_as_pi(v_sep_ratio)}")
         print("=" * 60)
 
-        for Nc in tqdm(cluster_sizes, desc="Cluster sizes", ncols=80):
+        # Build task list for cluster ED
+        task_list = []
+        for Nc in cluster_sizes:
             for int_sep in int_sep_map[Nc]:
                 for fill_idx, fill_mode in enumerate(filling_modes):
                     for u_idx, U in enumerate(u_list):
-                        # Determine target filling or fixed mu based on mode
                         if use_fixed_mu:
-                            # Fixed mu mode: use specified chemical potential
                             target_filling = None
                             mu0 = mu_mode_funcs[fill_mode](U)
                         elif set_filling is not None:
                             target_filling = set_filling
-                            mu0 = U / 2.0  # Initial guess
+                            mu0 = U / 2.0
                         else:
                             target_filling = filling_targets[fill_mode]
-                            mu0 = U / 2.0  # Initial guess
+                            mu0 = U / 2.0
 
-                        physical_params = PhysicalParams(U=U, mu_0=mu0, V=V, t=t)
-                        run_config = ClusterModelConfig(
-                            L=L,
-                            int_cluster_size=Nc,
-                            cluster_separation_ratio=int_sep,
-                            V_separation_ratio=v_sep_ratio,
-                            ham_lib='quspin',
-                            physical_params=physical_params,
-                            model_bc='periodic',
-                            int_cluster_bc='periodic',
-                            super_cluster_bc='periodic',
-                            solver_method=solver_method,
-                            states_retained=states_retained,
-                        )
+                        task_list.append((
+                            Nc, int_sep, fill_mode, u_idx, U, V, t, L, v_sep_ratio,
+                            solver_method, states_retained, target_filling, mu0, use_fixed_mu,
+                        ))
 
-                        try:
-                            super_cluster_size = None
-                            if timing_recorder is not None:
-                                try:
-                                    clusters_tmp = generate_clusters(L, Nc, int_sep, v_sep_ratio)
-                                    super_cluster_size = supercluster_size_from_clusters(clusters_tmp)
-                                except Exception:
-                                    pass
+        print(f"Total cluster ED tasks: {len(task_list)}, n_jobs={n_jobs}")
 
-                            meta = {
-                                "method": "cluster_ED",
-                                "U": U,
-                                "V": V,
-                                "t": t,
-                                "L": L,
-                                "Nc": Nc,
-                                "int_sep": int_sep,
-                                "v_sep": v_sep_ratio,
-                                "super_cluster_size": super_cluster_size,
-                                "filling_mode": fill_mode,
-                                "target_filling": target_filling,
-                                "fixed_mu": mu0 if use_fixed_mu else None,
-                            }
-
-                            if use_fixed_mu:
-                                # Fixed mu mode: pass mu_eff directly, no filling target
-                                system_expectations, _, _ = time_call(
-                                    timing_recorder,
-                                    meta,
-                                    get_general_expectations,
-                                    run_config,
-                                    timing_recorder=timing_recorder,
-                                    mu_eff=mu0,
-                                    return_mu=True,
-                                )
-                            else:
-                                # Target filling mode: use bisection to find mu
-                                system_expectations, _, _ = time_call(
-                                    timing_recorder,
-                                    meta,
-                                    get_general_expectations,
-                                    run_config,
-                                    timing_recorder=timing_recorder,
-                                    set_filling=target_filling,
-                                    return_mu=True,
-                                )
-
-                            energy, filling, _ = system_expectations
-                            energy_subtracted = (energy + mu0 * filling) / L
-                            key = (Nc, int_sep, fill_mode)
-                            cluster_results[key][u_idx] = energy_subtracted
-                            cluster_fillings[key][u_idx] = filling / L
-                        except Exception as exc:
-                            import traceback
-                            error_msg = str(exc) or f"{type(exc).__name__}: {repr(exc)}"
-                            failed_calculations.append({
-                                'method': f'cluster Nc={Nc}, int_sep={format_sep_as_pi(int_sep)}, {fill_mode}',
-                                'params': {'U': U, 'V': V},
-                                'error': error_msg,
-                                'traceback': traceback.format_exc(),
-                            })
+        if n_jobs == 1:
+            # Serial execution (preserves timing_recorder support)
+            for task_args in tqdm(task_list, desc="Cluster ED", ncols=80):
+                Nc, int_sep, fill_mode, u_idx, U = task_args[:5]
+                result = _cluster_ed_worker(task_args)
+                _, _, _, _, energy_sub, fill_per_site, error = result
+                if error is not None:
+                    failed_calculations.append(error)
+                else:
+                    key = (Nc, int_sep, fill_mode)
+                    cluster_results[key][u_idx] = energy_sub
+                    cluster_fillings[key][u_idx] = fill_per_site
+        else:
+            # Parallel execution
+            import multiprocessing
+            actual_jobs = n_jobs if n_jobs > 0 else (os.cpu_count() or 1)
+            actual_jobs = min(actual_jobs, len(task_list))
+            print(f"Using {actual_jobs} workers for {len(task_list)} tasks")
+            with multiprocessing.Pool(
+                actual_jobs,
+                initializer=_pool_initializer,
+            ) as pool:
+                results_list = pool.map(_cluster_ed_worker, task_list)
+            for result in results_list:
+                Nc, int_sep, fill_mode, u_idx, energy_sub, fill_per_site, error = result
+                if error is not None:
+                    failed_calculations.append(error)
+                else:
+                    key = (Nc, int_sep, fill_mode)
+                    cluster_results[key][u_idx] = energy_sub
+                    cluster_fillings[key][u_idx] = fill_per_site
 
         # Compute DMRG references for each filling mode
         print("\n")
