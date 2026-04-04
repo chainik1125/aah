@@ -188,5 +188,57 @@ def replot_from_pickle(
     )
 
 
+@mcp.tool()
+def run_computation_async(
+    command: str,
+    args: Optional[dict] = None,
+    yaml_config: Optional[str] = None,
+) -> dict:
+    """
+    Launch a computation in the background on the remote instance.
+    Returns immediately with a PID for monitoring via check_progress.
+
+    Use this for long-running computations that would exceed tool call timeouts.
+    The computation writes progress to ~/aah/progress.json on the remote.
+
+    Args:
+        command: cluster_runner command name.
+        args: CLI arguments as key-value pairs (e.g. {"L": 48, "n_jobs": 16}).
+        yaml_config: YAML config file path (relative to project root).
+
+    Returns:
+        Dict with pid, log_file, and the command that was launched.
+    """
+    return compute_tools.run_computation_async(
+        conn=conn,
+        remote_project_root=PATHS["remote_project_root"],
+        command=command,
+        args=args,
+        yaml_config=yaml_config,
+    )
+
+
+@mcp.tool()
+def check_progress() -> dict:
+    """
+    Check the progress of a running computation on the remote instance.
+    Reads progress.json and checks if the process is still alive.
+
+    Returns:
+        Dict with status ("running", "completed", "no_computation"),
+        progress details (total_tasks, completed, ETA), and recent log lines.
+    """
+    return compute_tools.check_progress(
+        conn=conn,
+        remote_project_root=PATHS["remote_project_root"],
+    )
+
+
 if __name__ == "__main__":
-    mcp.run()
+    import os
+    transport = os.environ.get("MCP_TRANSPORT", "stdio")
+    if transport == "sse":
+        port = int(os.environ.get("MCP_PORT", "8080"))
+        mcp.run(transport="sse", host="0.0.0.0", port=port)
+    else:
+        mcp.run()
