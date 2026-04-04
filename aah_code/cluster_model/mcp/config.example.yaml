@@ -2,6 +2,8 @@ remote:
   host: "YOUR_HOST_IP"
   port: 22112
   user: "root"
+  # Path to SSH key file. If the file doesn't exist, falls back to
+  # RUNPOD_SSH_KEY environment variable (for cloud deployments).
   key_path: "~/.ssh/id_ed25519"
 
 paths:

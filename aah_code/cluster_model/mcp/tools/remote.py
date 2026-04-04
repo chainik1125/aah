@@ -1,8 +1,44 @@
 """SSH and rsync tools for communicating with the remote instance."""
 
+import atexit
+import os
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Optional
+
+
+def _resolve_ssh_key(key_path: str) -> str:
+    """Resolve SSH key path, falling back to RUNPOD_SSH_KEY env var.
+
+    If the key file doesn't exist on disk, check for a RUNPOD_SSH_KEY
+    environment variable containing the private key contents. Write it
+    to a temp file with correct permissions and return that path.
+    This enables running in cloud environments (e.g. claude.ai/code)
+    where the key is stored as a secret rather than a file.
+    """
+    expanded = str(Path(key_path).expanduser())
+    if os.path.exists(expanded):
+        return expanded
+
+    key_data = os.environ.get("RUNPOD_SSH_KEY")
+    if not key_data:
+        return expanded  # Let SSH fail with its own error message
+
+    # Write key to a secure temp file
+    fd = tempfile.NamedTemporaryFile(
+        mode="w", prefix="runpod_key_", suffix="", delete=False,
+    )
+    fd.write(key_data)
+    if not key_data.endswith("\n"):
+        fd.write("\n")
+    fd.close()
+    os.chmod(fd.name, 0o600)
+
+    # Clean up on process exit
+    atexit.register(lambda p=fd.name: os.unlink(p) if os.path.exists(p) else None)
+
+    return fd.name
 
 
 class RemoteConnection:
@@ -12,7 +48,7 @@ class RemoteConnection:
         self.host = host
         self.port = port
         self.user = user
-        self.key_path = str(Path(key_path).expanduser())
+        self.key_path = _resolve_ssh_key(key_path)
 
     @property
     def _ssh_base(self) -> list[str]:
