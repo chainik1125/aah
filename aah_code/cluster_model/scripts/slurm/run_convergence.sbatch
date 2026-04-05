@@ -241,16 +241,15 @@ pushd "$SLURM_SUBMIT_DIR/aah" >/dev/null
 "$VENV_DIR/bin/python" -m pip install -e .
 popd >/dev/null
 
-if command -v nvidia-smi >/dev/null 2>&1; then
-    if nvidia-smi -L >/dev/null 2>&1; then
-        if ! "$VENV_DIR/bin/python" -c "import cupy" >/dev/null 2>&1; then
-            echo "GPU detected; installing CUDA extras"
-            "$VENV_DIR/bin/python" -m pip install -e .[cuda]
-        else
-            echo "CuPy already available in venv; skipping install."
-        fi
-    fi
-fi
+# Skip CuPy/CUDA extras — GPU eigensolver causes convergence failures.
+# Pin BLAS threads to avoid oversubscription.
+export CUDA_VISIBLE_DEVICES=-1
+export OMP_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+
+echo "Environment: CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES OMP_NUM_THREADS=$OMP_NUM_THREADS"
 
 if [[ "$RUN_COMMAND" == "$DEFAULT_RUN_COMMAND" ]]; then
     RUN_COMMAND="$VENV_DIR/bin/python -m aah_code.cluster_model.main"
