@@ -224,6 +224,51 @@ def run_fixed_supercluster(args):
         rows_per_page=args.rows_per_page,
         cols_per_page=args.cols_per_page,
         results=args.results,
+        finite_dmrg_bc=args.finite_dmrg_bc,
+    )
+
+    print("\nDone!")
+    return fig, results
+
+
+def run_compressibility_with_int_cluster_sizes(args):
+    """Run compare_compressibility_with_int_cluster_sizes with parsed arguments."""
+    from aah_code.cluster_model.plots import compare_compressibility_with_int_cluster_sizes
+
+    if args.int_sep_ratios_by_Nc:
+        int_sep_ratios_by_Nc = parse_int_sep_ratios_by_Nc(args.int_sep_ratios_by_Nc)
+    else:
+        raise ValueError("int_sep_ratios_by_Nc is required for this command")
+
+    print("=" * 60)
+    print("Running compare_compressibility_with_int_cluster_sizes")
+    print("=" * 60)
+    print(f"L={args.L}, chi={args.chi}")
+    print(f"int_sep_ratios_by_Nc={int_sep_ratios_by_Nc}")
+    print(f"U_values={args.U_values}")
+    print(f"V={args.V}")
+    print(f"n_mu_points={args.n_mu_points}")
+    print("=" * 60)
+
+    fig, results = compare_compressibility_with_int_cluster_sizes(
+        int_sep_ratios_by_Nc=int_sep_ratios_by_Nc,
+        U_values=args.U_values,
+        V=args.V,
+        v_sep_ratio=args.v_sep_ratio,
+        t=args.t,
+        L=args.L,
+        chi=args.chi,
+        solver_method=args.solver_method,
+        states_retained=args.states_retained,
+        include_idmrg=args.include_idmrg,
+        include_finite_dmrg=args.include_finite_dmrg,
+        save_data=args.save_data,
+        save_html=args.save_html,
+        show_plots=args.show_plots,
+        plot_relative_error=args.plot_relative_error,
+        n_mu_points=args.n_mu_points,
+        rows_per_page=args.rows_per_page,
+        cols_per_page=args.cols_per_page,
     )
 
     print("\nDone!")
@@ -552,6 +597,20 @@ def main():
     fsc_parser.add_argument('--cols_per_page', type=int, default=4, help='Columns per page')
     fsc_parser.add_argument('--axes', nargs=2, default=['U', 'V'],
                             help='What goes on x-axis vs rows: U V (default) or V U')
+    fsc_parser.add_argument('--finite_dmrg_bc', type=str, default='open', choices=['open', 'periodic'],
+                            help='Boundary conditions for finite DMRG (default: open)')
+
+    # compressibility_with_int_cluster_sizes subcommand
+    cwi_parser = subparsers.add_parser('compressibility_with_int_cluster_sizes',
+                                        help='Compressibility (filling vs mu) with multiple int_seps per Nc')
+    add_common_args(cwi_parser)
+    cwi_parser.add_argument('--int_sep_ratios_by_Nc', type=str, required=True,
+                            help='Int sep ratios as "Nc1:p1,q1|p2,q2;Nc2:p3,q3" (required)')
+    cwi_parser.add_argument('--V', type=float, default=0.0, help='Single V value (default: 0.0)')
+    cwi_parser.add_argument('--n_mu_points', type=int, default=30,
+                            help='Number of mu sweep points per U value (default: 30)')
+    cwi_parser.add_argument('--rows_per_page', type=int, default=4, help='Rows per page')
+    cwi_parser.add_argument('--cols_per_page', type=int, default=3, help='Columns per page')
 
     args = parser.parse_args()
 
@@ -565,6 +624,8 @@ def main():
         run_filling_with_int_cluster_sizes(args)
     elif args.command == 'fixed_supercluster':
         run_fixed_supercluster(args)
+    elif args.command == 'compressibility_with_int_cluster_sizes':
+        run_compressibility_with_int_cluster_sizes(args)
     else:
         print(f"Unknown command: {args.command}")
         sys.exit(1)

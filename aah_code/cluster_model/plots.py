@@ -6733,6 +6733,7 @@ def compare_fixed_supercluster(
     include_timing_plot: bool = False,
     plot_relative_error: bool = False,
     dmrg_fixed_filling: bool = True,
+    finite_dmrg_bc: str = 'open',
     axes: Tuple[str, str] = ('U', 'V'),
     rows_per_page: int = 2,
     cols_per_page: int = 3,
@@ -7080,12 +7081,14 @@ def compare_fixed_supercluster(
                         try:
                             if dmrg_fixed_filling:
                                 energy_finite, _, filling_finite = get_gnd_fixed_filling(
-                                    L, chi, set_filling, U, t, V, v_sep_ratio
+                                    L, chi, set_filling, U, t, V, v_sep_ratio,
+                                    bc=finite_dmrg_bc
                                 )
                             else:
                                 mu_0 = U / 2.0 if set_filling >= 0.9 else 0.0
                                 energy_finite, _, filling_finite = get_gnd(
-                                    L, chi, U, t, mu_0, V, v_sep_ratio
+                                    L, chi, U, t, mu_0, V, v_sep_ratio,
+                                    bc=finite_dmrg_bc
                                 )
                             energy_finite_per_site = energy_finite / L
                             finite_dmrg_cache[v_idx, u_idx] = energy_finite_per_site
