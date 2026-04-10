@@ -3,7 +3,7 @@
     {
       "id": "fig5_highU_pbc",
       "description": "Run Fig 5 appendix: high-U regime with PBC DMRG, L=48",
-      "status": "pending",
+      "status": "failed",
       "command": "fixed_supercluster",
       "args": {
         "L": 48,
@@ -17,12 +17,12 @@
         "n_jobs": 16
       },
       "created_at": "2026-04-04",
-      "result": null
+      "result": "FAILED: RunPod server 69.30.85.136:22112 unreachable — SSH connection timed out. Server may be offline or stopped. Please restart the instance and requeue."
     },
     {
       "id": "fig2_filling_fine_grid",
       "description": "Rerun Fig 2 compressibility with finer mu grid (200 points) to resolve filling steps at U=0",
-      "status": "pending",
+      "status": "failed",
       "command": "compressibility_with_int_cluster_sizes",
       "args": {
         "L": 48,
@@ -35,7 +35,7 @@
         "n_jobs": 16
       },
       "created_at": "2026-04-04",
-      "result": null
+      "result": "FAILED: RunPod server 69.30.85.136:22112 unreachable — SSH connection timed out. Server may be offline or stopped. Please restart the instance and requeue."
     }
   ]
 }
